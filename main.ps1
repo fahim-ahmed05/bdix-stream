@@ -114,18 +114,10 @@ function New-FullIndex {
     Write-Host ""
     Write-Host "Building index..." -ForegroundColor Cyan
 
-    $siteNum = 0
-    $totalSites = $h5aiToProcess.Count + $apacheToProcess.Count
-    foreach ($site in $h5aiToProcess) {
-        $siteNum++
-        Write-Host "[$siteNum/$totalSites] Indexing: $($site.url)" -ForegroundColor Cyan
-        Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
-        Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
-    }
-    foreach ($site in $apacheToProcess) {
-        $siteNum++
-        Write-Host "[$siteNum/$totalSites] Indexing: $($site.url)" -ForegroundColor Cyan
-        Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $true -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
+    Invoke-ForEachSource -H5aiList $h5aiToProcess -ApacheList $apacheToProcess -Action {
+        param($Site, $IsApache, $SiteNum, $TotalSites)
+        Write-Host "[$SiteNum/$TotalSites] Indexing: $($Site.url)" -ForegroundColor Cyan
+        Invoke-IndexCrawl -Url $Site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $IsApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
         Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
     }
 
@@ -291,20 +283,11 @@ function Update-IncrementalIndex {
         $tempIndex = @{}
         $tempMissingDirs = @()
 
-        $siteNum = 0
-        $totalSites = $H5aiSites.Count + $ApacheSites.Count
-        foreach ($site in $H5aiSites) {
-            $siteNum++
-            Write-Host "[$siteNum/$totalSites] Checking: $($site.url)" -ForegroundColor DarkGray
+        Invoke-ForEachSource -H5aiList $H5aiSites -ApacheList $ApacheSites -Action {
+            param($Site, $IsApache, $SiteNum, $TotalSites)
+            Write-Host "[$SiteNum/$TotalSites] Checking: $($Site.url)" -ForegroundColor DarkGray
             $script:MissingDateDirs = @()
-            Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $tempVisited -IndexRef $tempIndex -CrawlMetaRef $tempMeta -ForceReindexSet @{} -TrackStats $false
-            $tempMissingDirs += $script:MissingDateDirs
-        }
-        foreach ($site in $ApacheSites) {
-            $siteNum++
-            Write-Host "[$siteNum/$totalSites] Checking: $($site.url)" -ForegroundColor DarkGray
-            $script:MissingDateDirs = @()
-            Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $true -Visited $tempVisited -IndexRef $tempIndex -CrawlMetaRef $tempMeta -ForceReindexSet @{} -TrackStats $false
+            Invoke-IndexCrawl -Url $Site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $IsApache -Visited $tempVisited -IndexRef $tempIndex -CrawlMetaRef $tempMeta -ForceReindexSet @{} -TrackStats $false
             $tempMissingDirs += $script:MissingDateDirs
         }
         Write-Host ""
@@ -346,18 +329,11 @@ function Update-IncrementalIndex {
     Write-Host "Starting incremental update..." -ForegroundColor Cyan
     $script:NoLongerEmptyCount = 0
     $Visited = @{}
-    $siteNum = 0
-    $totalSites = $H5aiSites.Count + $ApacheSites.Count
-    foreach ($site in $H5aiSites) {
-        $siteNum++
-        Write-Host "[$siteNum/$totalSites] Updating: $($site.url)" -ForegroundColor Cyan
-        Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
-        Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
-    }
-    foreach ($site in $ApacheSites) {
-        $siteNum++
-        Write-Host "[$siteNum/$totalSites] Updating: $($site.url)" -ForegroundColor Cyan
-        Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $true -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
+    
+    Invoke-ForEachSource -H5aiList $H5aiSites -ApacheList $ApacheSites -Action {
+        param($Site, $IsApache, $SiteNum, $TotalSites)
+        Write-Host "[$SiteNum/$TotalSites] Updating: $($Site.url)" -ForegroundColor Cyan
+        Invoke-IndexCrawl -Url $Site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $IsApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
         Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
     }
 
@@ -391,7 +367,7 @@ function Update-IncrementalIndex {
 }
 
 function Remove-DeadLinks {
-    Show-Header "Purge Index"
+    Show-Header "Prune Index"
     if (!(Test-Path $CrawlerStatePath)) {
         Write-Host "Crawler state not found ($CrawlerStatePath). Nothing to clean." -ForegroundColor Yellow
         Wait-Return "Press Enter..."

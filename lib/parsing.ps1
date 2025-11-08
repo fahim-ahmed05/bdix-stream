@@ -45,3 +45,52 @@ function ConvertTo-StrictDateTime {
     if (-not $Value) { return $null }
     try { [DateTime]::Parse($Value) } catch { $null }
 }
+
+function Build-FullUrl {
+    param([string]$Href, [string]$BaseUrl)
+    if ($Href -match '^https?://') { return $Href }
+    if ($Href.StartsWith('/')) { return "$(Get-BaseHost $BaseUrl)$Href" }
+    return "$(($BaseUrl).TrimEnd('/'))/$Href"
+}
+
+function Get-ParsedRows {
+    param([string]$Html, [string]$BaseUrl, [bool]$IsApache, [string]$ItemType)
+    $results = @()
+    $videoExtensions = $Config.VideoExtensions
+    
+    [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
+        $row = $_.Value
+        if ($row -match '<th>' -or $row -like '*Parent Directory*') { return }
+        
+        # Extract href and name
+        if ($IsApache) {
+            if ($row -notmatch '<a\s+href="([^"]+)">([^<]+)</a>') { return }
+            $href = $matches[1]
+            $name = $matches[2].Trim()
+        }
+        else {
+            if ($row -notmatch '<a\s+href="([^"]+)"[^>]*>([^<]+)</a>') { return }
+            $href = $matches[1]
+            $name = [System.Web.HttpUtility]::UrlDecode([System.Web.HttpUtility]::HtmlDecode($matches[2].Trim()))
+        }
+        
+        # Filter by item type
+        if ($ItemType -eq 'dir') {
+            if (-not $href.EndsWith('/')) { return }
+        }
+        elseif ($ItemType -eq 'file') {
+            if ($href.EndsWith('/')) { return }
+            $ext = [System.IO.Path]::GetExtension($href).ToLower()
+            if ($videoExtensions -notcontains $ext) { return }
+        }
+        
+        $fullUrl = Build-FullUrl -Href $href -BaseUrl $BaseUrl
+        $lastModified = Get-LastModifiedFromRow -RowHtml $row
+        if ($lastModified -and (Test-InvalidTimestamp $lastModified)) { $lastModified = $null }
+        
+        $item = [PSCustomObject]@{ Name = $name; Url = $fullUrl; LastModified = $lastModified }
+        if ($ItemType -eq 'dir') { $item | Add-Member -NotePropertyName 'IsDir' -NotePropertyValue $true }
+        $results += $item
+    }
+    return $results
+}

@@ -1,5 +1,31 @@
 $script:LastStreamQuery = ""
 
+function Invoke-Download {
+    param([string]$Url, [string]$Name)
+    
+    $DownloadPath = $Config.DownloadPath
+    if (-not (Ensure-Directory -Path $DownloadPath)) {
+        Write-Host "Failed to create download folder: $DownloadPath" -ForegroundColor Red
+        return $false
+    }
+    
+    $filename = [System.IO.Path]::GetFileName($Url)
+    $outFile = Join-Path $DownloadPath $filename
+    Write-Host "Downloading to: $outFile" -ForegroundColor Cyan
+    
+    & $aria2cPath --continue=true --max-connection-per-server=8 --split=8 --retry-wait=5 --max-tries=10 --retry=10 --dir="$DownloadPath" --out="$filename" "$Url"
+    
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "Download complete." -ForegroundColor Green
+        Add-HistoryEntry -Name $Name -Url $Url
+        return $true
+    }
+    else {
+        Write-Host "Download may have failed." -ForegroundColor Yellow
+        return $false
+    }
+}
+
 function Invoke-LinkExplorer {
     while ($true) {
         Show-Header "Source Explorer"
@@ -276,14 +302,7 @@ function Invoke-SearchInteraction {
             $url = $parts[1]
             $name = if ($parts[0] -ne "-") { $parts[0] } else { [System.IO.Path]::GetFileName($url) }
             Write-Host "Selected for download: $name" -ForegroundColor Green
-            $DownloadPath = $Config.DownloadPath
-            if (-not (Ensure-Directory -Path $DownloadPath)) { Write-Host "Failed to create download folder: $DownloadPath" -ForegroundColor Red; continue }
-            $filename = [System.IO.Path]::GetFileName($url)
-            $outFile = Join-Path $DownloadPath $filename
-            Write-Host "Downloading to: $outFile" -ForegroundColor Cyan
-            & $aria2cPath --continue=true --max-connection-per-server=8 --split=8 --retry-wait=5 --max-tries=10 --retry=10 --dir="$DownloadPath" --out="$filename" "$url"
-            if ($LASTEXITCODE -eq 0) { Write-Host "Download complete." -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url }
-            else { Write-Host "Download may have failed." -ForegroundColor Yellow }
+            Invoke-Download -Url $url -Name $name
         }
         return
     }
@@ -293,13 +312,7 @@ function Invoke-SearchInteraction {
     if ($Mode -eq "Stream") { Write-Host "Streaming: $name" -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url; & $Config.MediaPlayer $url; $nextQuery = if ($script:LastStreamQuery) { $script:LastStreamQuery } else { $name }; Invoke-SearchInteraction -Mode Stream -InitialQuery $nextQuery }
     else {
         Write-Host "Selected for download: $name" -ForegroundColor Green
-        $DownloadPath = $Config.DownloadPath
-        if (-not (Ensure-Directory -Path $DownloadPath)) { Write-Host "Failed to create download folder: $DownloadPath" -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
-        $filename = [System.IO.Path]::GetFileName($url)
-        $outFile = Join-Path $DownloadPath $filename
-        Write-Host "Downloading to: $outFile" -ForegroundColor Cyan
-        & $aria2cPath --continue=true --max-connection-per-server=8 --split=8 --retry-wait=5 --max-tries=10 --retry=10 --dir="$DownloadPath" --out="$filename" "$url"
-        if ($LASTEXITCODE -eq 0) { Write-Host "Download complete." -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url } else { Write-Host "Download may have failed." -ForegroundColor Yellow }
+        Invoke-Download -Url $url -Name $name
         return
     }
 }
@@ -320,17 +333,29 @@ function Invoke-ResumeLastPlayed {
 }
 
 function View-BackupFiles {
-    $files = Get-BackupFiles
-    if ($files.Count -eq 0) { Write-Host "No backup files found." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
-    $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
-    $fzfArgs = @('--height=20', '--layout=reverse', '--delimiter=\t', '--with-nth=1', '--prompt=Backup: ')
-    $selected = $display | & $fzfPath @fzfArgs
-    if (!$selected -or $LASTEXITCODE -ne 0) { return }
-    $parts = $selected -split "`t", 2
-    if ($parts.Count -lt 2) { return }
-    $path = $parts[1]
-    if (Test-Path $path) { & $editPath $path }
-    View-BackupFiles
+    while ($true) {
+        Show-Header "View Backup Files"
+        $files = Get-BackupFiles
+        if ($files.Count -eq 0) {
+            Write-Host "No backup files found." -ForegroundColor Yellow
+            Wait-Return "Press Enter to return..."
+            return
+        }
+        Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
+        Write-Host ""
+        $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
+        $fzfArgs = @('--height=20', '--layout=reverse', '--delimiter=\t', '--with-nth=1', '--prompt=Backup: ')
+        $selected = $display | & $fzfPath @fzfArgs
+        if (!$selected -or $LASTEXITCODE -ne 0) { return }
+        $parts = $selected -split "`t", 2
+        if ($parts.Count -lt 2) { continue }
+        $path = $parts[1]
+        if (Test-Path $path) { & $editPath $path }
+        else {
+            Write-Host "File not found: $path" -ForegroundColor Red
+            Start-Sleep -Seconds 1
+        }
+    }
 }
 
 function Remove-BackupFiles {

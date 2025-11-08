@@ -1,72 +1,11 @@
 function Get-Dirs {
     param([string]$Html, [string]$BaseUrl, [bool]$IsApache)
-    $results = @()
-    if ($IsApache) {
-        [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
-            $row = $_.Value
-            if ($row -match '<th>' -or $row -like '*Parent Directory*') { return }
-            if ($row -notmatch '<a\s+href="([^"]+)">([^<]+)</a>') { return }
-            $href, $name = $matches[1], $matches[2].Trim()
-            if (!$href.EndsWith('/')) { return }
-            $fullUrl = if ($href -match '^https?://') { $href } elseif ($href.StartsWith('/')) { "$(Get-BaseHost $BaseUrl)$href" } else { "$(($BaseUrl).TrimEnd('/'))/$href" }
-            $lastModified = Get-LastModifiedFromRow -RowHtml $row
-            if ($lastModified -and (Test-InvalidTimestamp $lastModified)) { $lastModified = $null }
-            $results += [PSCustomObject]@{ Name = $name; Url = $fullUrl; LastModified = $lastModified; IsDir = $true }
-        }
-    }
-    else {
-        [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
-            $row = $_.Value
-            if ($row -match '<th>' -or $row -like '*Parent Directory*') { return }
-            if ($row -notmatch '<a\s+href="([^"]+)"[^>]*>([^<]+)</a>') { return }
-            $href, $name = $matches[1], [System.Web.HttpUtility]::UrlDecode([System.Web.HttpUtility]::HtmlDecode($matches[2].Trim()))
-            if (!$href.EndsWith('/')) { return }
-            $fullUrl = if ($href -match '^https?://') { $href } elseif ($href.StartsWith('/')) { "$(Get-BaseHost $BaseUrl)$href" } else { "$(($BaseUrl).TrimEnd('/'))/$href" }
-            $lastModified = Get-LastModifiedFromRow -RowHtml $row
-            if ($lastModified -and (Test-InvalidTimestamp $lastModified)) { $lastModified = $null }
-            $results += [PSCustomObject]@{ Name = $name; Url = $fullUrl; LastModified = $lastModified; IsDir = $true }
-        }
-    }
-    return $results
+    return Get-ParsedRows -Html $Html -BaseUrl $BaseUrl -IsApache $IsApache -ItemType 'dir'
 }
 
 function Get-Videos {
     param([string]$Html, [string]$BaseUrl, [bool]$IsApache)
-    $results = @()
-    $videoExtensions = $Config.VideoExtensions
-    if ($IsApache) {
-        [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
-            $row = $_.Value
-            if ($row -match '<th>' -or $row -like '*Parent Directory*') { return }
-            if ($row -notmatch '<a\s+href="([^"]+)">([^<]+)</a>') { return }
-            $href, $name = $matches[1], $matches[2].Trim()
-            if ($href.EndsWith('/')) { return }
-            $fullUrl = if ($href -match '^https?://') { $href } elseif ($href.StartsWith('/')) { "$(Get-BaseHost $BaseUrl)$href" } else { "$(($BaseUrl).TrimEnd('/'))/$href" }
-            $ext = [System.IO.Path]::GetExtension($href).ToLower()
-            if ($videoExtensions -contains $ext) {
-                $lastModified = Get-LastModifiedFromRow -RowHtml $row
-                if ($lastModified -and (Test-InvalidTimestamp $lastModified)) { $lastModified = $null }
-                $results += [PSCustomObject]@{ Name = $name; Url = $fullUrl; LastModified = $lastModified }
-            }
-        }
-    }
-    else {
-        [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
-            $row = $_.Value
-            if ($row -match '<th>' -or $row -like '*Parent Directory*') { return }
-            if ($row -notmatch '<a\s+href="([^"]+)"[^>]*>([^<]+)</a>') { return }
-            $href, $name = $matches[1], [System.Web.HttpUtility]::UrlDecode([System.Web.HttpUtility]::HtmlDecode($matches[2].Trim()))
-            if ($href.EndsWith('/')) { return }
-            $fullUrl = if ($href -match '^https?://') { $href } elseif ($href.StartsWith('/')) { "$(Get-BaseHost $BaseUrl)$href" } else { "$(($BaseUrl).TrimEnd('/'))/$href" }
-            $ext = [System.IO.Path]::GetExtension($href).ToLower()
-            if ($videoExtensions -contains $ext) {
-                $lastModified = Get-LastModifiedFromRow -RowHtml $row
-                if ($lastModified -and (Test-InvalidTimestamp $lastModified)) { $lastModified = $null }
-                $results += [PSCustomObject]@{ Name = $name; Url = $fullUrl; LastModified = $lastModified }
-            }
-        }
-    }
-    return $results
+    return Get-ParsedRows -Html $Html -BaseUrl $BaseUrl -IsApache $IsApache -ItemType 'file'
 }
 
 function Invoke-ExplorerCrawl {
