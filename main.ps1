@@ -75,7 +75,6 @@ else {
 
 $global:DirBlockSet = Get-DirBlockSet
 
-
 function New-FullIndex {
     Show-Header "Build Index"
     $Index = @{}
