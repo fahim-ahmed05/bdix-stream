@@ -16,13 +16,13 @@ $AsciiArt = @'
 '@
 
 $DefaultConfig = @{
-    MediaPlayer      = "mpv"
-    DownloadPath     = "$PSScriptRoot\downloads"
-    MaxCrawlDepth    = 9
-    HistoryMaxSize   = 50
-    VideoExtensions  = @('.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.m4v')
-    DirBlockList     = @('lost found', 'software', 'games', 'e book')
-    Tools            = @{
+    MediaPlayer     = "mpv"
+    DownloadPath    = "$PSScriptRoot\downloads"
+    MaxCrawlDepth   = 9
+    HistoryMaxSize  = 50
+    VideoExtensions = @('.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.m4v')
+    DirBlockList    = @('lost found', 'software', 'games', 'e book')
+    Tools           = @{
         fzf    = ""
         aria2c = ""
         jq     = ""
@@ -112,6 +112,9 @@ function New-FullIndex {
         $CrawlMeta = Get-CrawlMeta
     }
 
+    Write-Host ""
+    Write-Host "Building index..." -ForegroundColor Cyan
+
     foreach ($site in $h5aiToProcess) {
         Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
         Write-Host "$($site.url)" -ForegroundColor White
@@ -162,7 +165,7 @@ function New-FullIndex {
     Set-Urls -H5ai $H5aiSites -Apache $ApacheSites
 
     $elapsed = $Stopwatch.Elapsed.ToString('hh\:mm\:ss')
-    Write-Host "Full index build complete." -ForegroundColor Green
+    Write-Host "Index build complete." -ForegroundColor Green
     Write-Host "  Total indexed files: $($Index.Count)" -ForegroundColor Green
     if ($script:SkippedBlockedDirs -gt 0) { Write-Host "  Blocked directories skipped: $script:SkippedBlockedDirs" -ForegroundColor Green }
     Write-Host "  Elapsed time: $elapsed" -ForegroundColor Green
