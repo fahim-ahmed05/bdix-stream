@@ -163,11 +163,15 @@ function Purge-Sources {
     if ($allSources.Count -eq 0) { Write-Host "No source URLs configured in $SourceUrlsPath." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     Write-Host "Checking source accessibility..." -ForegroundColor Yellow
     $inaccessible = @()
+    $checkedCount = 0
     foreach ($src in $allSources) {
+        $checkedCount++
+        Write-Host "[$checkedCount/$($allSources.Count)] Checking: $($src.url)" -ForegroundColor DarkGray
         try { $resp = Invoke-WebRequest -Uri $src.url -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop; $ok = ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) }
         catch { $ok = $false }
         if (-not $ok) { $inaccessible += $src }
     }
+    Write-Host ""
     if ($inaccessible.Count -eq 0) { Write-Host "All sources are reachable. Nothing to purge." -ForegroundColor Green; Wait-Return "Press Enter to return..."; return }
     $roots = @($inaccessible | ForEach-Object { $_.url })
     $indexCount = 0; $indexRemove = 0
@@ -193,14 +197,17 @@ function Purge-Sources {
     $backupFiles = Backup-Files -Paths @($SourceUrlsPath, $MediaIndexPath, $CrawlerStatePath)
     if ($backupFiles.Count -gt 0) { Write-Host "Backed up: $($backupFiles -join ', ')" -ForegroundColor Green }
     $rootSet = @{ }; foreach ($r in $roots) { $rootSet[(Add-TrailingSlash $r)] = $true }
+    Write-Host "Processing index..." -ForegroundColor Cyan
     if (Test-Path $MediaIndexPath) {
         $idx = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
         if ($idx) { $idx = @($idx | Where-Object { $keep = $true; foreach ($r in $rootSet.Keys) { if ($_.Url.StartsWith($r)) { $keep = $false; break } }; $keep }) }
         $idx | ConvertTo-Json -Depth 10 | Set-Content $MediaIndexPath -Encoding UTF8
     }
+    Write-Host "Processing crawler state..." -ForegroundColor Cyan
     $crawlNew = @{}
     foreach ($k in $crawl.Keys) { $keep = $true; foreach ($r in $rootSet.Keys) { if ($k.StartsWith($r)) { $keep = $false; break } }; if ($keep) { $crawlNew[$k] = $crawl[$k] } }
     Set-CrawlMeta -Meta $crawlNew
+    Write-Host "Updating source list..." -ForegroundColor Cyan
     $script:H5aiSites = @($H5aiSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     $script:ApacheSites = @($ApacheSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites

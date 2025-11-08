@@ -114,14 +114,18 @@ function New-FullIndex {
     Write-Host ""
     Write-Host "Building index..." -ForegroundColor Cyan
 
+    $siteNum = 0
+    $totalSites = $h5aiToProcess.Count + $apacheToProcess.Count
     foreach ($site in $h5aiToProcess) {
+        $siteNum++
+        Write-Host "[$siteNum/$totalSites] Indexing: $($site.url)" -ForegroundColor Cyan
         Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
-        Write-Host "$($site.url)" -ForegroundColor White
         Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
     }
     foreach ($site in $apacheToProcess) {
+        $siteNum++
+        Write-Host "[$siteNum/$totalSites] Indexing: $($site.url)" -ForegroundColor Cyan
         Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $true -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
-        Write-Host "$($site.url)" -ForegroundColor White
         Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
     }
 
@@ -134,15 +138,19 @@ function New-FullIndex {
     }
 
     if ($onlyNew -and (Test-Path $MediaIndexPath)) {
+        Write-Host "Merging with existing index..." -ForegroundColor Cyan
         $existingIndex = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
         $existingMap = @{}
         foreach ($e in $existingIndex) { $existingMap[$e.Url] = $e }
         foreach ($k in $Index.Keys) { $existingMap[$k] = $Index[$k] }
+        Write-Host "Saving merged index..." -ForegroundColor Cyan
         $existingMap.Values | ConvertTo-Json -Depth 10 | Set-Content $MediaIndexPath -Encoding UTF8
     }
     else {
+        Write-Host "Saving index..." -ForegroundColor Cyan
         $Index.Values | ConvertTo-Json -Depth 10 | Set-Content $MediaIndexPath -Encoding UTF8
     }
+    Write-Host "Saving crawler state..." -ForegroundColor Cyan
     Set-CrawlMeta -Meta $CrawlMeta
     $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
     if ($missingCount -gt 0) {
@@ -163,9 +171,20 @@ function New-FullIndex {
     }
     Set-Urls -H5ai $H5aiSites -Apache $ApacheSites
 
+    # Count empty directories
+    Write-Host "Counting empty directories..." -ForegroundColor Cyan
+    $emptyDirCount = 0
+    foreach ($k in $CrawlMeta.Keys) {
+        $entry = $CrawlMeta[$k]
+        if ($entry.type -eq 'dir' -and $entry.ContainsKey('empty') -and $entry['empty']) {
+            $emptyDirCount++
+        }
+    }
+
     $elapsed = $Stopwatch.Elapsed.ToString('hh\:mm\:ss')
     Write-Host "Index build complete." -ForegroundColor Green
     Write-Host "  Total indexed files: $($Index.Count)" -ForegroundColor Green
+    Write-Host "  Empty directories: $emptyDirCount" -ForegroundColor Green
     if ($script:SkippedBlockedDirs -gt 0) { Write-Host "  Blocked directories skipped: $script:SkippedBlockedDirs" -ForegroundColor Green }
     Write-Host "  Elapsed time: $elapsed" -ForegroundColor Green
     Wait-Return "Press Enter to return..."
@@ -174,6 +193,7 @@ function New-FullIndex {
 function Update-IncrementalIndex {
     Show-Header "Update Index"
 
+    Write-Host "Loading existing index and crawler state..." -ForegroundColor Cyan
     $CrawlMeta = Get-CrawlMeta
     $Index = @{}
     $Index = Get-ExistingIndexMap
@@ -195,21 +215,29 @@ function Update-IncrementalIndex {
         return
     }
 
-    # Check existing crawler state for missing timestamps
+    # Check existing crawler state for missing timestamps and empty directories
+    Write-Host "Analyzing existing crawler state..." -ForegroundColor Cyan
     $existingMissingDirs = @()
     $existingMissingFileCount = 0
+    $existingEmptyDirs = @()
     foreach ($k in $CrawlMeta.Keys) {
         $entry = $CrawlMeta[$k]
-        if ($entry.type -eq 'dir' -and -not $entry.ContainsKey('last_modified')) {
-            $existingMissingDirs += $k
-            # Count files under this directory
-            foreach ($fk in $CrawlMeta.Keys) {
-                if ($CrawlMeta[$fk].type -eq 'file' -and $fk.StartsWith($k)) {
-                    $existingMissingFileCount++
+        if ($entry.type -eq 'dir') {
+            if (-not $entry.ContainsKey('last_modified')) {
+                $existingMissingDirs += $k
+                # Count files under this directory
+                foreach ($fk in $CrawlMeta.Keys) {
+                    if ($CrawlMeta[$fk].type -eq 'file' -and $fk.StartsWith($k)) {
+                        $existingMissingFileCount++
+                    }
                 }
+            }
+            if ($entry.ContainsKey('empty') -and $entry['empty']) {
+                $existingEmptyDirs += $k
             }
         }
     }
+    Write-Host ""
 
     if ($existingMissingDirs.Count -gt 0) {
         Write-Host "Existing crawler state shows:" -ForegroundColor Yellow
@@ -237,6 +265,22 @@ function Update-IncrementalIndex {
         else {
             $skipDryRun = $false
         }
+    }
+
+    if ($existingEmptyDirs.Count -gt 0) {
+        Write-Host "Existing crawler state shows:" -ForegroundColor Yellow
+        Write-Host "  Empty directories: $($existingEmptyDirs.Count)" -ForegroundColor Yellow
+        Write-Host ""
+        $checkEmpty = Read-YesNo -Message "Check if empty directories now have content? (y/N)" -Default 'N'
+        if ($checkEmpty) {
+            $forceCheckEmptyDirs = $true
+        }
+        else {
+            $forceCheckEmptyDirs = $false
+        }
+    }
+    else {
+        $forceCheckEmptyDirs = $false
     }
 
     # Dry-run crawl to discover directories with missing timestamps (only if user wants it)
@@ -295,23 +339,33 @@ function Update-IncrementalIndex {
     if ($reindexMissing) {
         foreach ($u in $uniqueMissingDirs) { $forceSet[$u] = $true }
     }
+    if ($forceCheckEmptyDirs) {
+        foreach ($u in $existingEmptyDirs) { $forceSet[$u] = $true }
+    }
 
     Write-Host "Starting incremental update..." -ForegroundColor Cyan
+    $script:NoLongerEmptyCount = 0
     $Visited = @{}
+    $siteNum = 0
+    $totalSites = $H5aiSites.Count + $ApacheSites.Count
     foreach ($site in $H5aiSites) {
+        $siteNum++
+        Write-Host "[$siteNum/$totalSites] Updating: $($site.url)" -ForegroundColor Cyan
         Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
-        Write-Host "$($site.url)" -ForegroundColor White
         Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
     }
     foreach ($site in $ApacheSites) {
+        $siteNum++
+        Write-Host "[$siteNum/$totalSites] Updating: $($site.url)" -ForegroundColor Cyan
         Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $true -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
-        Write-Host "$($site.url)" -ForegroundColor White
         Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
     }
 
     Write-Host ""
 
+    Write-Host "Saving index..." -ForegroundColor Cyan
     $Index.Values | ConvertTo-Json -Depth 10 | Set-Content $MediaIndexPath -Encoding UTF8
+    Write-Host "Saving crawler state..." -ForegroundColor Cyan
     Set-CrawlMeta -Meta $CrawlMeta
     $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
     if ($missingCount -gt 0) {
@@ -330,6 +384,7 @@ function Update-IncrementalIndex {
     Write-Host "  New directories: $script:NewDirs" -ForegroundColor Green
     Write-Host "  New files: $script:NewFiles" -ForegroundColor Green
     Write-Host "  Unchanged directories: $script:IgnoredDirsSameTimestamp" -ForegroundColor Green
+    if ($script:NoLongerEmptyCount -gt 0) { Write-Host "  Previously empty directories now with content: $script:NoLongerEmptyCount" -ForegroundColor Green }
     if ($script:SkippedBlockedDirs -gt 0) { Write-Host "  Blocked directories skipped: $script:SkippedBlockedDirs" -ForegroundColor Green }
     Write-Host "  Elapsed time: $elapsed" -ForegroundColor Green
     Wait-Return "Press Enter to return..."
@@ -368,6 +423,7 @@ function Remove-DeadLinks {
     $totalDirsToCheck = $dirKeys.Count
     $processedDirs = 0
 
+    Write-Host "Checking $totalDirsToCheck directories..." -ForegroundColor Cyan
     $apacheRootUrls = @($ApacheSites | ForEach-Object { $_.url })
     foreach ($dirUrl in $dirKeys) {
         $isApache = [bool]($apacheRootUrls | Where-Object { $dirUrl.StartsWith($_) })
@@ -381,6 +437,9 @@ function Remove-DeadLinks {
         }
 
         $processedDirs++
+        if ($processedDirs % 10 -eq 0) {
+            Write-Host "Checked $processedDirs / $totalDirsToCheck directories..." -ForegroundColor DarkGray
+        }
         $normDir = Add-TrailingSlash $dirUrl
         $liveUrls[$normDir] = $true
         $liveDirSet[$normDir] = $true
@@ -400,10 +459,11 @@ function Remove-DeadLinks {
 
     }
 
+    Write-Host "Analyzing crawler state for dead links..." -ForegroundColor Cyan
     $deadCount = 0
     $newCrawlMeta = @{}
     $newIndex = @{}
-    $deadUrls = @()
+    $deadUrls = @{}
 
     foreach ($url in $CrawlMeta.Keys) {
         if ($liveUrls.ContainsKey($url)) {
@@ -419,7 +479,9 @@ function Remove-DeadLinks {
     }
 
     if ($deadCount -gt 0) {
+        Write-Host "Saving updated index..." -ForegroundColor Cyan
         $newIndex.Values | ConvertTo-Json -Depth 10 | Set-Content $MediaIndexPath -Encoding UTF8
+        Write-Host "Saving updated crawler state..." -ForegroundColor Cyan
         Set-CrawlMeta -Meta $newCrawlMeta
 
         $removedSoFar = 0
