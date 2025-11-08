@@ -80,7 +80,7 @@ function Wait-Return {
     Read-Host | Out-Null
 }
 
-function Ensure-Directory {
+function Initialize-Directory {
     param([Parameter(Mandatory = $true)][string]$Path)
     if (Test-Path $Path) { return $true }
     try { New-Item -ItemType Directory -Path $Path -Force | Out-Null; return $true } catch { return $false }
@@ -150,7 +150,7 @@ function Resolve-Tool {
     }
 }
 
-function Ensure-Tools {
+function Test-Tools {
     param([hashtable]$ToolsConfig)
     $required = @('fzf', 'aria2c', 'jq', 'edit')
     $resolved = @{}

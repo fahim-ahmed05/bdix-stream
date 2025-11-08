@@ -4,7 +4,7 @@ function Invoke-Download {
     param([string]$Url, [string]$Name)
     
     $DownloadPath = $script:Config.DownloadPath
-    if (-not (Ensure-Directory -Path $DownloadPath)) {
+    if (-not (Initialize-Directory -Path $DownloadPath)) {
         Write-Host "Failed to create download folder: $DownloadPath" -ForegroundColor Red
         return $false
     }
@@ -142,7 +142,7 @@ function Invoke-LinkExplorer {
     }
 }
 
-function Add-Url {
+function Add-Source {
     while ($true) {
         Show-Header "Add Source"
         $url = Read-Host "Enter URL (or 'b' to return, 'q' to quit)"
@@ -190,7 +190,7 @@ function Remove-SelectableItems {
     Wait-Return "Press Enter to return..."
 }
 
-function Remove-SourceUrl {
+function Remove-Source {
     Remove-SelectableItems -Title 'Remove Sources' -Prompt 'Sources:' -GetItemsScript {
         $out = [System.Collections.ArrayList]::new()
         foreach ($s in $H5aiSites) { $null = $out.Add("$( $s.url )`th5ai") }
@@ -213,7 +213,7 @@ function Remove-SourceUrl {
     }
 }
 
-function Purge-Sources {
+function Remove-InaccessibleSources {
     Show-Header "Purge Sources"
     $allSources = Get-AllSourcesList -NormalizeUrls
     if ($allSources.Count -eq 0) { Write-Host "No source URLs configured in $SourceUrlsPath." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
@@ -314,7 +314,7 @@ function Add-HistoryEntry {
     $history | ConvertTo-Json -Compress | Set-Content $WatchHistoryPath -Encoding UTF8
 }
 
-function Find-WatchHistory {
+function Show-WatchHistory {
     Show-Header "Watch History"
     $history = Read-JsonFile -Path $WatchHistoryPath
     if (!$history -or $history.Count -eq 0) { Write-Host "History is empty." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
@@ -382,6 +382,141 @@ function Invoke-DownloadSearch { Invoke-SearchInteraction -Mode Download }
 
 function Add-HistoryEntry-SafePlay([string]$Name, [string]$Url) { Add-HistoryEntry -Name $Name -Url $Url; & $script:Config.MediaPlayer $Url }
 
+# Unified backup file operations handler
+function Invoke-BackupFileOperation {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('view', 'remove', 'restore')]
+        [string]$Mode
+    )
+    
+    $titleMap = @{
+        'view' = 'View Backup Files'
+        'remove' = 'Remove Backup Files'
+        'restore' = 'Restore Backup Files'
+    }
+    
+    $promptMap = @{
+        'view' = 'Backup: '
+        'remove' = 'Backups:'
+        'restore' = 'Restore: '
+    }
+    
+    if ($Mode -eq 'view') {
+        # View mode - loop for continuous viewing
+        while ($true) {
+            Show-Header $titleMap[$Mode]
+            $files = Get-BackupFiles
+            if ($files.Count -eq 0) {
+                Write-Host "No backup files found." -ForegroundColor Yellow
+                Wait-Return "Press Enter to return..."
+                return
+            }
+            Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
+            Write-Host ""
+            $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
+            $selected = Invoke-Fzf -InputData $display -Prompt $promptMap[$Mode] -WithNth '1' -Height 20 -Delimiter "`t"
+            if (!$selected -or $LASTEXITCODE -ne 0) { return }
+            $parts = $selected -split "`t", 2
+            if ($parts.Count -lt 2) { continue }
+            $path = $parts[1]
+            if (Test-Path $path) { & $script:editPath $path }
+            else {
+                Write-Host "File not found: $path" -ForegroundColor Red
+                Start-Sleep -Seconds 1
+            }
+        }
+    }
+    elseif ($Mode -eq 'remove') {
+        # Remove mode
+        Remove-SelectableItems -Title $titleMap[$Mode] -Prompt $promptMap[$Mode] -GetItemsScript {
+            foreach ($f in (Get-BackupFiles)) { (Split-Path $f -Leaf) + "`t" + $f }
+        } -RemoveScript {
+            param($selectedLines)
+            $removeList = [System.Collections.ArrayList]::new()
+            foreach ($l in $selectedLines) { 
+                $p = ($l -split "`t", 2)
+                if ($p.Count -ge 2) { $null = $removeList.Add($p[1]) } 
+            }
+            $confirm = Read-YesNo -Message "Remove $($removeList.Count) backup file(s)? (y/N)" -Default 'N'
+            if (-not $confirm) { return 0 }
+            foreach ($r in $removeList) { if (Test-Path $r) { Remove-Item -Path $r -Force } }
+            return $removeList.Count
+        }
+    }
+    else {
+        # Restore mode
+        Show-Header $titleMap[$Mode]
+        $files = Get-BackupFiles
+        if (-not $files -or $files.Count -eq 0) { 
+            Write-Host "No backup files found." -ForegroundColor Yellow
+            Wait-Return "Press Enter to return..."
+            return
+        }
+        Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
+        Write-Host "" 
+        $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
+        $selected = Invoke-Fzf -InputData $display -Prompt $promptMap[$Mode] -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
+        if (!$selected -or $LASTEXITCODE -ne 0) { return }
+        $lines = $selected -split "`n" | Where-Object { $_ }
+        if ($lines.Count -eq 0) { return }
+        $restoreList = [System.Collections.ArrayList]::new()
+        foreach ($l in $lines) { 
+            $p = ($l -split "`t", 2)
+            if ($p.Count -ge 2) { $null = $restoreList.Add($p[1]) } 
+        }
+        $confirm = Read-YesNo -Message "Restore $($restoreList.Count) file(s)? Existing data files will be moved to backups. (y/N)" -Default 'N'
+        if (-not $confirm) { return }
+        $restored = 0
+        $skipped = 0
+        $failed = 0
+        $nowStamp = Get-Date -Format 'yyyyMMdd_HHmmss'
+        foreach ($src in $restoreList) {
+            try {
+                if (-not (Test-Path $src)) { $skipped++; continue }
+                $leaf = Split-Path $src -Leaf
+                $ext = [System.IO.Path]::GetExtension($leaf)
+                $nameNoExt = [System.IO.Path]::GetFileNameWithoutExtension($leaf)
+                # Extract base name by removing timestamp suffix (yyyyMMdd_HHmmss)
+                if ($nameNoExt -notmatch '^(?<base>.+?)(\d{8}_\d{6})$') { 
+                    Write-Host "Skip (no timestamp suffix): $leaf" -ForegroundColor Yellow
+                    $skipped++
+                    continue
+                }
+                $base = $matches['base']
+                $origLeaf = "${base}${ext}"
+                $origPath = Join-Path $DataDir $origLeaf
+                # Move existing file to backups before restoring
+                if (Test-Path $origPath) {
+                    $destBackup = Join-Path $BackupRoot ("${base}$nowStamp$ext")
+                    Move-Item -Path $origPath -Destination $destBackup -Force
+                }
+                Move-Item -Path $src -Destination $origPath -Force
+                Write-Host "Restored -> $origLeaf" -ForegroundColor Green
+                $restored++
+            }
+            catch {
+                $failed++
+            }
+        }
+        Write-Host "Restore summary: Restored=$restored, Skipped=$skipped, Failed=$failed" -ForegroundColor Cyan
+        Wait-Return "Press Enter to return..."
+    }
+}
+
+# Wrapper functions for backwards compatibility
+function Show-BackupFiles {
+    Invoke-BackupFileOperation -Mode 'view'
+}
+
+function Remove-BackupFiles {
+    Invoke-BackupFileOperation -Mode 'remove'
+}
+
+function Restore-BackupFiles {
+    Invoke-BackupFileOperation -Mode 'restore'
+}
+
 function Invoke-ResumeLastPlayed {
     Show-Header "Resume Stream"
     $history = Read-JsonFile -Path $WatchHistoryPath
@@ -393,94 +528,3 @@ function Invoke-ResumeLastPlayed {
     & $script:Config.MediaPlayer $last.Url
 }
 
-function View-BackupFiles {
-    while ($true) {
-        Show-Header "View Backup Files"
-        $files = Get-BackupFiles
-        if ($files.Count -eq 0) {
-            Write-Host "No backup files found." -ForegroundColor Yellow
-            Wait-Return "Press Enter to return..."
-            return
-        }
-        Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
-        Write-Host ""
-        $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
-        $selected = Invoke-Fzf -InputData $display -Prompt 'Backup: ' -WithNth '1' -Height 20 -Delimiter "`t"
-        if (!$selected -or $LASTEXITCODE -ne 0) { return }
-        $parts = $selected -split "`t", 2
-        if ($parts.Count -lt 2) { continue }
-        $path = $parts[1]
-        if (Test-Path $path) { & $script:editPath $path }
-        else {
-            Write-Host "File not found: $path" -ForegroundColor Red
-            Start-Sleep -Seconds 1
-        }
-    }
-}
-
-function Remove-BackupFiles {
-    Remove-SelectableItems -Title 'Remove Backup Files' -Prompt 'Backups:' -GetItemsScript {
-        foreach ($f in (Get-BackupFiles)) { (Split-Path $f -Leaf) + "`t" + $f }
-    } -RemoveScript {
-        param($selectedLines)
-        $removeList = [System.Collections.ArrayList]::new()
-        foreach ($l in $selectedLines) { 
-            $p = ($l -split "`t", 2)
-            if ($p.Count -ge 2) { $null = $removeList.Add($p[1]) } 
-        }
-        $confirm = Read-YesNo -Message "Remove $($removeList.Count) backup file(s)? (y/N)" -Default 'N'
-        if (-not $confirm) { return 0 }
-        foreach ($r in $removeList) { if (Test-Path $r) { Remove-Item -Path $r -Force } }
-        return $removeList.Count
-    }
-}
-
-function Restore-BackupFiles {
-    Show-Header "Restore Backup Files"
-    $files = Get-BackupFiles
-    if (-not $files -or $files.Count -eq 0) { Write-Host "No backup files found." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
-    Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
-    Write-Host "" 
-    $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
-    $selected = Invoke-Fzf -InputData $display -Prompt 'Restore: ' -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
-    if (!$selected -or $LASTEXITCODE -ne 0) { return }
-    $lines = $selected -split "`n" | Where-Object { $_ }
-    if ($lines.Count -eq 0) { return }
-    $restoreList = [System.Collections.ArrayList]::new()
-    foreach ($l in $lines) { 
-        $p = ($l -split "`t", 2)
-        if ($p.Count -ge 2) { $null = $restoreList.Add($p[1]) } 
-    }
-    $confirm = Read-YesNo -Message "Restore $($restoreList.Count) file(s)? Existing data files will be moved to backups. (y/N)" -Default 'N'
-    if (-not $confirm) { return }
-    $restored = 0
-    $skipped = 0
-    $failed = 0
-    $nowStamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    foreach ($src in $restoreList) {
-        try {
-            if (-not (Test-Path $src)) { $skipped++; continue }
-            $leaf = Split-Path $src -Leaf
-            $ext = [System.IO.Path]::GetExtension($leaf)
-            $nameNoExt = [System.IO.Path]::GetFileNameWithoutExtension($leaf)
-            # Extract base name by removing timestamp suffix (yyyyMMdd_HHmmss)
-            if ($nameNoExt -notmatch '^(?<base>.+?)(\d{8}_\d{6})$') { Write-Host "Skip (no timestamp suffix): $leaf" -ForegroundColor Yellow; $skipped++; continue }
-            $base = $matches['base']
-            $origLeaf = "${base}${ext}"
-            $origPath = Join-Path $DataDir $origLeaf
-            # Move existing file to backups before restoring
-            if (Test-Path $origPath) {
-                $destBackup = Join-Path $BackupRoot ("${base}$nowStamp$ext")
-                Move-Item -Path $origPath -Destination $destBackup -Force
-            }
-            Move-Item -Path $src -Destination $origPath -Force
-            Write-Host "Restored -> $origLeaf" -ForegroundColor Green
-            $restored++
-        }
-        catch {
-            $failed++
-        }
-    }
-    Write-Host "Restore summary: Restored=$restored, Skipped=$skipped, Failed=$failed" -ForegroundColor Cyan
-    Wait-Return "Press Enter to return..."
-}
