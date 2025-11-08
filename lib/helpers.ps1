@@ -237,8 +237,16 @@ function Get-NormalizedBlockList {
         if ($item -match ' ') { $variants += ($item -replace ' ', '-') }
         if ($item -match '_') { $variants += ($item -replace '_', ' ') }
         if ($item -match ' ') { $variants += ($item -replace ' ', '_') }
-        $variants = $variants | ForEach-Object { ($_ -replace '\s+', ' ').Trim() } | Where-Object { $_ } | Select-Object -Unique
-        foreach ($v in $variants) { $set.Add($v.ToLowerInvariant()) | Out-Null }
+        
+        # Process variants in single loop instead of pipeline chain
+        $seen = @{}
+        foreach ($v in $variants) {
+            $normalized = ($v -replace '\s+', ' ').Trim()
+            if ($normalized -and -not $seen.ContainsKey($normalized)) {
+                $seen[$normalized] = $true
+                $set.Add($normalized.ToLowerInvariant()) | Out-Null
+            }
+        }
     }
     return @($set)
 }

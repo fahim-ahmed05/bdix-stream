@@ -384,9 +384,17 @@ function Remove-DeadLinks {
     $processedDirs = 0
 
     Write-Host "Checking $totalDirsToCheck directories..." -ForegroundColor Cyan
-    $apacheRootUrls = @($ApacheSites | ForEach-Object { $_.url })
+    
+    # Build hashtable for faster Apache root lookup
+    $apacheRootSet = @{}
+    foreach ($s in $ApacheSites) { $apacheRootSet[$s.url] = $true }
+    
     foreach ($dirUrl in $dirKeys) {
-        $isApache = [bool]($apacheRootUrls | Where-Object { $dirUrl.StartsWith($_) })
+        # Check if URL starts with any Apache root (faster hashtable lookup)
+        $isApache = $false
+        foreach ($root in $apacheRootSet.Keys) {
+            if ($dirUrl.StartsWith($root)) { $isApache = $true; break }
+        }
 
         try {
             $response = Invoke-WebRequest -Uri $dirUrl -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop

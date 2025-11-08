@@ -126,8 +126,13 @@ function Add-Url {
         if ($url.Trim().ToLowerInvariant() -eq 'q') { exit 0 }
         if (!$url.StartsWith('http')) { Write-Host "Invalid URL. Must begin with http(s)." -ForegroundColor Red; Start-Sleep -Seconds 1; continue }
         $url = Add-TrailingSlash $url
-        $exists = ($H5aiSites | Where-Object { $_.url -eq $url }).Count -gt 0 -or ($ApacheSites | Where-Object { $_.url -eq $url }).Count -gt 0
-        if ($exists) { Write-Host "URL already exists in source-urls.json. Skipping." -ForegroundColor Yellow; Start-Sleep -Seconds 1; continue }
+        
+        # Build hashtable for faster lookup
+        $existingUrls = @{}
+        foreach ($s in $H5aiSites) { $existingUrls[$s.url] = $true }
+        foreach ($s in $ApacheSites) { $existingUrls[$s.url] = $true }
+        
+        if ($existingUrls.ContainsKey($url)) { Write-Host "URL already exists in source-urls.json. Skipping." -ForegroundColor Yellow; Start-Sleep -Seconds 1; continue }
         $type = Read-Host "Type? (1) h5ai / (2) Apache [default: h5ai]"
         $obj = [PSCustomObject]@{ url = $url; indexed = $false }
         $isApache = $false
@@ -200,15 +205,31 @@ function Purge-Sources {
     Write-Host ""
     if ($inaccessible.Count -eq 0) { Write-Host "All sources are reachable. Nothing to purge." -ForegroundColor Green; Wait-Return "Press Enter to return..."; return }
     $roots = @($inaccessible | ForEach-Object { $_.url })
+    
+    # Build hashtable for faster root matching
+    $rootSet = @{}
+    foreach ($r in $roots) { $rootSet[(Add-TrailingSlash $r)] = $true }
+    
     $indexCount = 0; $indexRemove = 0
     if (Test-Path $MediaIndexPath) {
         $idx = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
-        if ($idx) { $indexCount = $idx.Count; foreach ($e in $idx) { foreach ($r in $roots) { if ($e.Url.StartsWith($r)) { $indexRemove++; break } } } }
+        if ($idx) { 
+            $indexCount = $idx.Count
+            foreach ($e in $idx) {
+                foreach ($r in $rootSet.Keys) {
+                    if ($e.Url.StartsWith($r)) { $indexRemove++; break }
+                }
+            }
+        }
     }
     $crawl = Get-CrawlMeta
     $crawlCount = $crawl.Keys.Count
     $crawlRemove = 0
-    foreach ($k in $crawl.Keys) { foreach ($r in $roots) { if ($k.StartsWith($r)) { $crawlRemove++; break } } }
+    foreach ($k in $crawl.Keys) {
+        foreach ($r in $rootSet.Keys) {
+            if ($k.StartsWith($r)) { $crawlRemove++; break }
+        }
+    }
     $srcCount = $allSources.Count
     $srcRemove = $inaccessible.Count
     Write-Host "Unreachable sources: $srcRemove / $srcCount" -ForegroundColor Yellow
@@ -222,16 +243,30 @@ function Purge-Sources {
     if (-not $confirm) { Write-Host "Aborted." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     $backupFiles = Backup-Files -Paths @($SourceUrlsPath, $MediaIndexPath, $CrawlerStatePath)
     if ($backupFiles.Count -gt 0) { Write-Host "Backed up: $($backupFiles -join ', ')" -ForegroundColor Green }
-    $rootSet = @{ }; foreach ($r in $roots) { $rootSet[(Add-TrailingSlash $r)] = $true }
+    
     Write-Host "Processing index..." -ForegroundColor Cyan
     if (Test-Path $MediaIndexPath) {
         $idx = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
-        if ($idx) { $idx = @($idx | Where-Object { $keep = $true; foreach ($r in $rootSet.Keys) { if ($_.Url.StartsWith($r)) { $keep = $false; break } }; $keep }) }
+        if ($idx) { 
+            $idx = @($idx | Where-Object { 
+                $keep = $true
+                foreach ($r in $rootSet.Keys) {
+                    if ($_.Url.StartsWith($r)) { $keep = $false; break }
+                }
+                $keep
+            })
+        }
         $idx | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
     }
     Write-Host "Processing crawler state..." -ForegroundColor Cyan
     $crawlNew = @{}
-    foreach ($k in $crawl.Keys) { $keep = $true; foreach ($r in $rootSet.Keys) { if ($k.StartsWith($r)) { $keep = $false; break } }; if ($keep) { $crawlNew[$k] = $crawl[$k] } }
+    foreach ($k in $crawl.Keys) {
+        $keep = $true
+        foreach ($r in $rootSet.Keys) {
+            if ($k.StartsWith($r)) { $keep = $false; break }
+        }
+        if ($keep) { $crawlNew[$k] = $crawl[$k] }
+    }
     Set-CrawlMeta -Meta $crawlNew
     Write-Host "Updating source list..." -ForegroundColor Cyan
     $script:H5aiSites = @($H5aiSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
