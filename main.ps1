@@ -37,27 +37,27 @@ else {
     $UserConfig = @{}
 }
 
-$Config = Get-MergedConfig $DefaultConfig $UserConfig
+$script:Config = Get-MergedConfig $DefaultConfig $UserConfig
 
 if (!(Test-Path $SettingsPath)) {
     $OrderedConfig = [ordered]@{
-        DownloadPath    = $Config.DownloadPath
-        HistoryMaxSize  = $Config.HistoryMaxSize
-        MaxCrawlDepth   = $Config.MaxCrawlDepth
-        MediaPlayer     = $Config.MediaPlayer
-        VideoExtensions = $Config.VideoExtensions
-        DirBlockList    = $Config.DirBlockList
-        Tools           = $Config.Tools
+        DownloadPath    = $script:Config.DownloadPath
+        HistoryMaxSize  = $script:Config.HistoryMaxSize
+        MaxCrawlDepth   = $script:Config.MaxCrawlDepth
+        MediaPlayer     = $script:Config.MediaPlayer
+        VideoExtensions = $script:Config.VideoExtensions
+        DirBlockList    = $script:Config.DirBlockList
+        Tools           = $script:Config.Tools
     }
     $OrderedConfig | ConvertTo-Json -Depth 5 -Compress | Set-Content $SettingsPath -Encoding UTF8
     Write-Host "Created default config: $SettingsPath" -ForegroundColor Green
 }
 
-$_toolPaths = Ensure-Tools -ToolsConfig $Config.Tools
-$fzfPath = $_toolPaths.fzf
-$aria2cPath = $_toolPaths.aria2c
-$jqPath = $_toolPaths.jq
-$editPath = $_toolPaths.edit
+$_toolPaths = Ensure-Tools -ToolsConfig $script:Config.Tools
+$script:fzfPath = $_toolPaths.fzf
+$script:aria2cPath = $_toolPaths.aria2c
+$script:jqPath = $_toolPaths.jq
+$script:editPath = $_toolPaths.edit
 
 
 if (Test-Path $SourceUrlsPath) {
@@ -117,7 +117,7 @@ function New-FullIndex {
     Invoke-ForEachSource -H5aiList $h5aiToProcess -ApacheList $apacheToProcess -Action {
         param($Site, $IsApache, $SiteNum, $TotalSites)
         Write-Host "[$SiteNum/$TotalSites] Indexing: $($Site.url)" -ForegroundColor Cyan
-        Invoke-IndexCrawl -Url $Site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $IsApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
+        Invoke-IndexCrawl -Url $Site.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $IsApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet @{} -TrackStats $true
         Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
     }
 
@@ -317,7 +317,7 @@ function Update-IncrementalIndex {
     Invoke-ForEachSource -H5aiList $H5aiSites -ApacheList $ApacheSites -Action {
         param($Site, $IsApache, $SiteNum, $TotalSites)
         Write-Host "[$SiteNum/$TotalSites] Updating: $($Site.url)" -ForegroundColor Cyan
-        Invoke-IndexCrawl -Url $Site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $IsApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
+        Invoke-IndexCrawl -Url $Site.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $IsApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
         Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
     }
 
@@ -496,8 +496,7 @@ function New-SelectiveIndex {
         "$($src.url)`t$($src.type)`t$status"
     }
     
-    $fzfArgs = @('--height=20', '--layout=reverse', '--delimiter=\t', '--with-nth=1,3', '--prompt=Select Sources: ', '--multi')
-    $selected = $displayLines | & $fzfPath @fzfArgs
+    $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Select Sources: ' -WithNth '1,3' -Multi $true -Height 20 -Delimiter "`t"
     
     if (!$selected -or $LASTEXITCODE -ne 0) { return }
     
@@ -570,7 +569,7 @@ function New-SelectiveIndex {
             foreach ($k in $keysToRemove) { $CrawlMeta.Remove($k) }
         }
         
-        Invoke-IndexCrawl -Url $src.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
+        Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
         Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
     }
     

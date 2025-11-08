@@ -261,7 +261,7 @@ function Get-LastUrlSegment {
 }
 
 function Get-DirBlockSet {
-    $raw = if ($Config.DirBlockList) { @($Config.DirBlockList) } else { @() }
+    $raw = if ($script:Config.DirBlockList) { @($script:Config.DirBlockList) } else { @() }
     if (-not $raw -or $raw.Count -eq 0) { return @() }
     return (Get-NormalizedBlockList -List $raw)
 }
@@ -314,4 +314,37 @@ function Invoke-ForEachSource {
             & $Action -Site $site -IsApache $true
         }
     }
+}
+
+function Invoke-Fzf {
+    param(
+        [Parameter(Mandatory = $true)]
+        $InputData,
+        
+        [string]$Prompt = 'Search: ',
+        [string]$Delimiter = "`t",
+        [string]$WithNth = '1',
+        [string]$Query = '',
+        [int]$Height = 20,
+        [bool]$Multi = $false,
+        [bool]$PrintQuery = $false
+    )
+    
+    $fzfArgs = @(
+        "--height=$Height",
+        "--layout=reverse",
+        "--delimiter=$Delimiter",
+        "--with-nth=$WithNth",
+        "--prompt=$Prompt"
+    )
+    
+    if ($Multi) { $fzfArgs += '--multi' }
+    if ($PrintQuery) { $fzfArgs += '--print-query' }
+    if (-not [string]::IsNullOrWhiteSpace($Query)) { $fzfArgs += "--query=$Query" }
+    
+    $selected = $InputData | & $script:fzfPath @fzfArgs
+    
+    if ($LASTEXITCODE -ne 0) { return $null }
+    
+    return $selected
 }

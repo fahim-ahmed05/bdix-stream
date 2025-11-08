@@ -3,7 +3,7 @@ $script:LastStreamQuery = ""
 function Invoke-Download {
     param([string]$Url, [string]$Name)
     
-    $DownloadPath = $Config.DownloadPath
+    $DownloadPath = $script:Config.DownloadPath
     if (-not (Ensure-Directory -Path $DownloadPath)) {
         Write-Host "Failed to create download folder: $DownloadPath" -ForegroundColor Red
         return $false
@@ -13,7 +13,7 @@ function Invoke-Download {
     $outFile = Join-Path $DownloadPath $filename
     Write-Host "Downloading to: $outFile" -ForegroundColor Cyan
     
-    & $aria2cPath --continue=true --max-connection-per-server=8 --split=8 --retry-wait=5 --max-tries=10 --retry=10 --dir="$DownloadPath" --out="$filename" "$Url"
+    & $script:aria2cPath --continue=true --max-connection-per-server=8 --split=8 --retry-wait=5 --max-tries=10 --retry=10 --dir="$DownloadPath" --out="$filename" "$Url"
     
     if ($LASTEXITCODE -eq 0) {
         Write-Host "Download complete." -ForegroundColor Green
@@ -40,7 +40,7 @@ function Invoke-LinkExplorer {
         $url = Add-TrailingSlash $url
         $type = Read-Host "Server type? (1) h5ai / (2) Apache [default: h5ai]"
         $parser = if ($type -eq '2') { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $true } } else { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $false } }
-        $maxDepth = [Math]::Min($Config.MaxCrawlDepth, 9)
+        $maxDepth = [Math]::Min($script:Config.MaxCrawlDepth, 9)
         do {
             $depthInput = Read-Host "Crawl depth (1-$maxDepth) [default: 2]"
             if ([string]::IsNullOrWhiteSpace($depthInput)) { $depthInput = "2" }
@@ -96,9 +96,7 @@ function Invoke-LinkExplorer {
         Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
         Write-Host ""
         $displayLines = foreach ($dir in $leafDirs) { "$( $dir )`t$( $decodedMap[$dir] )" }
-        $fzfArgs = @("--height=20", "--layout=reverse", "--delimiter=\t", "--with-nth=1", "--prompt=Select: ")
-        $fzfArgs += '--multi'
-        $selected = $displayLines | & $fzfPath @fzfArgs
+        $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Select: ' -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
         if (!$selected -or $LASTEXITCODE -ne 0) { continue }
         $lines = $selected -split "`n" | Where-Object { $_ }
         $chosenSet = @()
@@ -158,9 +156,7 @@ function Remove-SelectableItems {
     Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
     Write-Host ""
     $display = @($items)
-    $fzfArgs = @("--height=20", "--layout=reverse", "--delimiter=\t", "--with-nth=1", "--prompt=$Prompt ")
-    $fzfArgs += '--multi'
-    $selected = $display | & $fzfPath @fzfArgs
+    $selected = Invoke-Fzf -InputData $display -Prompt $Prompt -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
     if (!$selected -or $LASTEXITCODE -ne 0) { return }
     $lines = $selected -split "`n" | Where-Object { $_ }
     if ($lines.Count -eq 0) { return }
@@ -285,7 +281,7 @@ function Add-HistoryEntry {
     $entry = [PSCustomObject]@{ Name = $Name; Url = $Url; Time = Get-Date -Format 'yyyy-MM-dd HH:mm:ss' }
     if (Test-Path $WatchHistoryPath) { $history = Get-Content $WatchHistoryPath -Raw | ConvertFrom-Json } else { $history = @() }
     $history = @($entry) + ($history | Where-Object { $_.Url -ne $Url })
-    if ($Config.HistoryMaxSize -gt 0 -and $history.Count -gt $Config.HistoryMaxSize) { $history = $history[0..($Config.HistoryMaxSize - 1)] }
+    if ($script:Config.HistoryMaxSize -gt 0 -and $history.Count -gt $script:Config.HistoryMaxSize) { $history = $history[0..($script:Config.HistoryMaxSize - 1)] }
     $history | ConvertTo-Json -Compress | Set-Content $WatchHistoryPath -Encoding UTF8
 }
 
@@ -297,15 +293,14 @@ function Find-WatchHistory {
     $displayLines = foreach ($item in $history) { "$( $item.Name )`t$( $item.Url )" }
     Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
     Write-Host ""
-    $fzfArgs = @("--height=20", "--layout=reverse", "--delimiter=\t", "--with-nth=1", "--prompt=Search: ")
-    $selected = $displayLines | & $fzfPath @fzfArgs
+    $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Search: ' -WithNth '1' -Height 20 -Delimiter "`t"
     if (!$selected -or $LASTEXITCODE -ne 0) { return }
     $parts = $selected -split "`t", 2
     if ($parts.Count -lt 2) { return }
     $url = $parts[1]; $name = $parts[0]
     Write-Host "Playing from history: $name" -ForegroundColor Green
     Add-HistoryEntry -Name $name -Url $url
-    & $Config.MediaPlayer $url
+    & $script:Config.MediaPlayer $url
 }
 
 function Invoke-SearchInteraction {
@@ -315,13 +310,15 @@ function Invoke-SearchInteraction {
     if ($Mode -eq "Stream") { Write-Host "Tip: press ESC to return." -ForegroundColor Yellow; Write-Host "" }
     if (!(Test-Path $MediaIndexPath)) { Write-Host "Index file not found: $MediaIndexPath. Build the index first." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
     $jqQuery = '.[] | "\(.Name // "-" )\t\(.Url)"'
-    $rawLines = Get-Content $MediaIndexPath -Raw | & $jqPath -r $jqQuery
+    $rawLines = Get-Content $MediaIndexPath -Raw | & $script:jqPath -r $jqQuery
     if (!$rawLines) { Write-Host "Index is empty." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
-    $fzfArgs = @("--height=20", "--layout=reverse", "--delimiter=\t", "--with-nth=1", "--prompt=Search: ")
-    if ($Mode -eq "Stream") { if ($InitialQuery) { $fzfArgs += "--query=$InitialQuery" } elseif ($script:LastStreamQuery) { $fzfArgs += "--query=$script:LastStreamQuery" } }
-    if ($Mode -eq "Download") { $fzfArgs += "--multi" }
-    if ($Mode -eq "Stream") { $fzfArgs += "--print-query" }
-    $selected = $rawLines | & $fzfPath @fzfArgs
+    
+    $fzfQuery = ''
+    if ($Mode -eq "Stream") {
+        if ($InitialQuery) { $fzfQuery = $InitialQuery }
+        elseif ($script:LastStreamQuery) { $fzfQuery = $script:LastStreamQuery }
+    }
+    $selected = Invoke-Fzf -InputData $rawLines -Prompt 'Search: ' -WithNth '1' -Height 20 -Delimiter "`t" -Query $fzfQuery -Multi ($Mode -eq "Download") -PrintQuery ($Mode -eq "Stream")
     if (!$selected) { return }
     if ($Mode -eq "Stream") {
         $outLines = $selected -split "`n" | Where-Object { $_ }
@@ -344,7 +341,7 @@ function Invoke-SearchInteraction {
     $parts = $selected -split "`t", 2
     if ($parts.Count -lt 2) { return }
     $url = $parts[1]; $name = if ($parts[0] -ne "-") { $parts[0] } else { [System.IO.Path]::GetFileName($url) }
-    if ($Mode -eq "Stream") { Write-Host "Streaming: $name" -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url; & $Config.MediaPlayer $url; $nextQuery = if ($script:LastStreamQuery) { $script:LastStreamQuery } else { $name }; Invoke-SearchInteraction -Mode Stream -InitialQuery $nextQuery }
+    if ($Mode -eq "Stream") { Write-Host "Streaming: $name" -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url; & $script:Config.MediaPlayer $url; $nextQuery = if ($script:LastStreamQuery) { $script:LastStreamQuery } else { $name }; Invoke-SearchInteraction -Mode Stream -InitialQuery $nextQuery }
     else {
         Write-Host "Selected for download: $name" -ForegroundColor Green
         Invoke-Download -Url $url -Name $name
@@ -355,7 +352,7 @@ function Invoke-SearchInteraction {
 function Invoke-StreamSearch { Invoke-SearchInteraction -Mode Stream }
 function Invoke-DownloadSearch { Invoke-SearchInteraction -Mode Download }
 
-function Add-HistoryEntry-SafePlay([string]$Name, [string]$Url) { Add-HistoryEntry -Name $Name -Url $Url; & $Config.MediaPlayer $Url }
+function Add-HistoryEntry-SafePlay([string]$Name, [string]$Url) { Add-HistoryEntry -Name $Name -Url $Url; & $script:Config.MediaPlayer $Url }
 
 function Invoke-ResumeLastPlayed {
     Show-Header "Resume Stream"
@@ -364,7 +361,7 @@ function Invoke-ResumeLastPlayed {
     if (!$last) { Write-Host "Nothing to resume." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     Write-Host "Resuming: $($last.Name)" -ForegroundColor Green
     Add-HistoryEntry -Name $last.Name -Url $last.Url
-    & $Config.MediaPlayer $last.Url
+    & $script:Config.MediaPlayer $last.Url
 }
 
 function View-BackupFiles {
@@ -379,13 +376,12 @@ function View-BackupFiles {
         Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
         Write-Host ""
         $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
-        $fzfArgs = @('--height=20', '--layout=reverse', '--delimiter=\t', '--with-nth=1', '--prompt=Backup: ')
-        $selected = $display | & $fzfPath @fzfArgs
+        $selected = Invoke-Fzf -InputData $display -Prompt 'Backup: ' -WithNth '1' -Height 20 -Delimiter "`t"
         if (!$selected -or $LASTEXITCODE -ne 0) { return }
         $parts = $selected -split "`t", 2
         if ($parts.Count -lt 2) { continue }
         $path = $parts[1]
-        if (Test-Path $path) { & $editPath $path }
+        if (Test-Path $path) { & $script:editPath $path }
         else {
             Write-Host "File not found: $path" -ForegroundColor Red
             Start-Sleep -Seconds 1
@@ -414,9 +410,7 @@ function Restore-BackupFiles {
     Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
     Write-Host "" 
     $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
-    $fzfArgs = @('--height=20', '--layout=reverse', '--delimiter=\t', '--with-nth=1', '--prompt=Restore: ')
-    $fzfArgs += '--multi'
-    $selected = $display | & $fzfPath @fzfArgs
+    $selected = Invoke-Fzf -InputData $display -Prompt 'Restore: ' -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
     if (!$selected -or $LASTEXITCODE -ne 0) { return }
     $lines = $selected -split "`n" | Where-Object { $_ }
     if ($lines.Count -eq 0) { return }
