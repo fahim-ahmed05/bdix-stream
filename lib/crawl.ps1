@@ -112,4 +112,4 @@ function Get-CrawlMeta {
     return @{}
 }
 
-function Set-CrawlMeta { param([hashtable]$Meta) $Meta | ConvertTo-Json -Depth 10 | Set-Content $CrawlerStatePath -Encoding UTF8 }
+function Set-CrawlMeta { param([hashtable]$Meta) $Meta | ConvertTo-Json -Depth 10 -Compress | Set-Content $CrawlerStatePath -Encoding UTF8 }

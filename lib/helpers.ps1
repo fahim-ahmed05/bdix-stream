@@ -200,7 +200,7 @@ function Set-Urls {
         ApacheSites = $Apache
         H5aiSites   = $H5ai
     }
-    $payload | ConvertTo-Json -Depth 6 | Set-Content $SourceUrlsPath -Encoding UTF8
+    $payload | ConvertTo-Json -Depth 6 -Compress | Set-Content $SourceUrlsPath -Encoding UTF8
 }
 
 function Get-MergedConfig($Default, $Override) {

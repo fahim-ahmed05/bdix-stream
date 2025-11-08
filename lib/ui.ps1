@@ -227,7 +227,7 @@ function Purge-Sources {
     if (Test-Path $MediaIndexPath) {
         $idx = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
         if ($idx) { $idx = @($idx | Where-Object { $keep = $true; foreach ($r in $rootSet.Keys) { if ($_.Url.StartsWith($r)) { $keep = $false; break } }; $keep }) }
-        $idx | ConvertTo-Json -Depth 10 | Set-Content $MediaIndexPath -Encoding UTF8
+        $idx | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
     }
     Write-Host "Processing crawler state..." -ForegroundColor Cyan
     $crawlNew = @{}
@@ -251,7 +251,7 @@ function Add-HistoryEntry {
     if (Test-Path $WatchHistoryPath) { $history = Get-Content $WatchHistoryPath -Raw | ConvertFrom-Json } else { $history = @() }
     $history = @($entry) + ($history | Where-Object { $_.Url -ne $Url })
     if ($Config.HistoryMaxSize -gt 0 -and $history.Count -gt $Config.HistoryMaxSize) { $history = $history[0..($Config.HistoryMaxSize - 1)] }
-    $history | ConvertTo-Json | Set-Content $WatchHistoryPath -Encoding UTF8
+    $history | ConvertTo-Json -Compress | Set-Content $WatchHistoryPath -Encoding UTF8
 }
 
 function Find-WatchHistory {
