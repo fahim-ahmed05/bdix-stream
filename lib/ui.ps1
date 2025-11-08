@@ -70,8 +70,8 @@ function Invoke-LinkExplorer {
         $blockSet = $global:DirBlockSet
         $filteredDirs = @()
         foreach ($dir in $normalizedDirs) {
-            $nameDecoded = ($decodedMap[$dir] | ForEach-Object { $_.ToLowerInvariant() })
-            $nameRaw = ($rawMap[$dir] | ForEach-Object { $_.ToLowerInvariant() })
+            $nameDecoded = $decodedMap[$dir].ToLowerInvariant()
+            $nameRaw = $rawMap[$dir].ToLowerInvariant()
             $isBlocked = ($blockSet -contains $nameDecoded) -or ($blockSet -contains $nameRaw)
             if (-not $isBlocked) { $filteredDirs += $dir }
         }
@@ -80,12 +80,27 @@ function Invoke-LinkExplorer {
             Start-Sleep -Seconds 1
             continue
         }
-        $leafDirs = @()
-        foreach ($dir in $filteredDirs) {
+        
+        # Optimize leaf directory finding with sorted array and prefix checking
+        $sortedDirs = $filteredDirs | Sort-Object
+        $leafDirs = [System.Collections.ArrayList]::new()
+        for ($i = 0; $i -lt $sortedDirs.Count; $i++) {
+            $dir = $sortedDirs[$i]
             $isParent = $false
-            foreach ($other in $filteredDirs) { if ($other -ne $dir -and $other.StartsWith($dir)) { $isParent = $true; break } }
-            if (-not $isParent) { $leafDirs += $dir }
+            # Only check subsequent items since array is sorted
+            for ($j = $i + 1; $j -lt $sortedDirs.Count; $j++) {
+                if ($sortedDirs[$j].StartsWith($dir)) {
+                    $isParent = $true
+                    break
+                }
+                # If next item doesn't start with current dir prefix, no need to check further
+                if (-not $sortedDirs[$j].StartsWith($dir.Substring(0, [Math]::Min(3, $dir.Length)))) {
+                    break
+                }
+            }
+            if (-not $isParent) { $null = $leafDirs.Add($dir) }
         }
+        
         if ($leafDirs.Count -eq 0) {
             Write-Host "No leaf directories remain after pruning parents." -ForegroundColor Yellow
             Start-Sleep -Seconds 1
@@ -99,16 +114,23 @@ function Invoke-LinkExplorer {
         $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Select: ' -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
         if (!$selected -or $LASTEXITCODE -ne 0) { continue }
         $lines = $selected -split "`n" | Where-Object { $_ }
-        $chosenSet = @()
-        foreach ($line in $lines) { $parts = $line -split "`t", 2; if ($parts.Count -ge 1) { $chosenSet += (Add-TrailingSlash $parts[0]) } }
+        $chosenSet = [System.Collections.ArrayList]::new()
+        foreach ($line in $lines) { 
+            $parts = $line -split "`t", 2
+            if ($parts.Count -ge 1) { $null = $chosenSet.Add((Add-TrailingSlash $parts[0])) } 
+        }
         if ($chosenSet.Count -eq 0) { continue }
         $isApache = $false
         if ($type -match '^(?i)(2|a|apache)$') { $isApache = $true }
         $targetList = if ($isApache) { $ApacheSites } else { $H5aiSites }
         $existingSet = @{}
         foreach ($t in $targetList) { $existingSet[$t.url] = $true }
-        $newObjects = @()
-        foreach ($dir in $chosenSet) { if (-not $existingSet.ContainsKey($dir)) { $newObjects += [PSCustomObject]@{ url = $dir; indexed = $false } } }
+        $newObjects = [System.Collections.ArrayList]::new()
+        foreach ($dir in $chosenSet) { 
+            if (-not $existingSet.ContainsKey($dir)) { 
+                $null = $newObjects.Add([PSCustomObject]@{ url = $dir; indexed = $false }) 
+            } 
+        }
         if ($newObjects.Count -eq 0) { Write-Host "No new URLs to add (all already existed)." -ForegroundColor Yellow }
         else { 
             foreach ($obj in $newObjects) {
@@ -170,14 +192,20 @@ function Remove-SelectableItems {
 
 function Remove-SourceUrl {
     Remove-SelectableItems -Title 'Remove Sources' -Prompt 'Sources:' -GetItemsScript {
-        $out = @()
-        foreach ($s in $H5aiSites) { $out += "$( $s.url )`th5ai" }
-        foreach ($s in $ApacheSites) { $out += "$( $s.url )`tapache" }
-        $out | Sort-Object -Unique
+        $out = [System.Collections.ArrayList]::new()
+        foreach ($s in $H5aiSites) { $null = $out.Add("$( $s.url )`th5ai") }
+        foreach ($s in $ApacheSites) { $null = $out.Add("$( $s.url )`tapache") }
+        @($out | Sort-Object -Unique)
     } -RemoveScript {
         param($selectedLines)
         $removeSet = @{}
-        foreach ($line in $selectedLines) { $parts = $line -split "`t", 2; if ($parts.Count -ge 1) { $u = Add-TrailingSlash $parts[0]; if (-not $removeSet.ContainsKey($u)) { $removeSet[$u] = $true } } }
+        foreach ($line in $selectedLines) { 
+            $parts = $line -split "`t", 2
+            if ($parts.Count -ge 1) { 
+                $u = Add-TrailingSlash $parts[0]
+                if (-not $removeSet.ContainsKey($u)) { $removeSet[$u] = $true } 
+            } 
+        }
         $script:H5aiSites = @($H5aiSites | Where-Object { -not $removeSet.ContainsKey($_.url) })
         $script:ApacheSites = @($ApacheSites | Where-Object { -not $removeSet.ContainsKey($_.url) })
         Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites
@@ -187,23 +215,22 @@ function Remove-SourceUrl {
 
 function Purge-Sources {
     Show-Header "Purge Sources"
-    $allSources = @()
-    foreach ($s in $H5aiSites) { $allSources += [PSCustomObject]@{ url = Add-TrailingSlash $s.url; type = 'h5ai' } }
-    foreach ($s in $ApacheSites) { $allSources += [PSCustomObject]@{ url = Add-TrailingSlash $s.url; type = 'apache' } }
+    $allSources = Get-AllSourcesList -NormalizeUrls
     if ($allSources.Count -eq 0) { Write-Host "No source URLs configured in $SourceUrlsPath." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     Write-Host "Checking source accessibility..." -ForegroundColor Yellow
-    $inaccessible = @()
+    $inaccessible = [System.Collections.ArrayList]::new()
     $checkedCount = 0
     foreach ($src in $allSources) {
         $checkedCount++
         Write-Host "[$checkedCount/$($allSources.Count)] Checking: $($src.url)" -ForegroundColor DarkGray
         $resp = Invoke-SafeWebRequest -Url $src.url -TimeoutSec 8
         $ok = ($resp -and $resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400)
-        if (-not $ok) { $inaccessible += $src }
+        if (-not $ok) { $null = $inaccessible.Add($src) }
     }
     Write-Host ""
     if ($inaccessible.Count -eq 0) { Write-Host "All sources are reachable. Nothing to purge." -ForegroundColor Green; Wait-Return "Press Enter to return..."; return }
-    $roots = @($inaccessible | ForEach-Object { $_.url })
+    $roots = [System.Collections.ArrayList]::new()
+    foreach ($item in $inaccessible) { $null = $roots.Add($item.url) }
     
     # Build hashtable for faster root matching
     $rootSet = @{}
@@ -396,8 +423,11 @@ function Remove-BackupFiles {
         foreach ($f in (Get-BackupFiles)) { (Split-Path $f -Leaf) + "`t" + $f }
     } -RemoveScript {
         param($selectedLines)
-        $removeList = @()
-        foreach ($l in $selectedLines) { $p = ($l -split "`t", 2); if ($p.Count -ge 2) { $removeList += $p[1] } }
+        $removeList = [System.Collections.ArrayList]::new()
+        foreach ($l in $selectedLines) { 
+            $p = ($l -split "`t", 2)
+            if ($p.Count -ge 2) { $null = $removeList.Add($p[1]) } 
+        }
         $confirm = Read-YesNo -Message "Remove $($removeList.Count) backup file(s)? (y/N)" -Default 'N'
         if (-not $confirm) { return 0 }
         foreach ($r in $removeList) { if (Test-Path $r) { Remove-Item -Path $r -Force } }
@@ -416,8 +446,11 @@ function Restore-BackupFiles {
     if (!$selected -or $LASTEXITCODE -ne 0) { return }
     $lines = $selected -split "`n" | Where-Object { $_ }
     if ($lines.Count -eq 0) { return }
-    $restoreList = @()
-    foreach ($l in $lines) { $p = ($l -split "`t", 2); if ($p.Count -ge 2) { $restoreList += $p[1] } }
+    $restoreList = [System.Collections.ArrayList]::new()
+    foreach ($l in $lines) { 
+        $p = ($l -split "`t", 2)
+        if ($p.Count -ge 2) { $null = $restoreList.Add($p[1]) } 
+    }
     $confirm = Read-YesNo -Message "Restore $($restoreList.Count) file(s)? Existing data files will be moved to backups. (y/N)" -Default 'N'
     if (-not $confirm) { return }
     $restored = 0

@@ -26,16 +26,29 @@ $BlockedDirsLogPath = Join-Path $DataDir 'blocked-dirs.log'
 if (!(Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir | Out-Null }
 
 function Get-AllRootUrls {
-    $roots = @()
-    if ($H5aiSites) { $roots += @($H5aiSites | ForEach-Object { $_.url }) }
-    if ($ApacheSites) { $roots += @($ApacheSites | ForEach-Object { $_.url }) }
     $seen = @{}
-    $dedup = @()
-    foreach ($r in $roots) {
-        $ru = Add-TrailingSlash $r
-        if (-not $seen.ContainsKey($ru)) { $seen[$ru] = $true; $dedup += $ru }
+    $dedup = [System.Collections.ArrayList]::new()
+    
+    if ($H5aiSites) { 
+        foreach ($s in $H5aiSites) {
+            $ru = Add-TrailingSlash $s.url
+            if (-not $seen.ContainsKey($ru)) { 
+                $seen[$ru] = $true
+                $null = $dedup.Add($ru)
+            }
+        }
     }
-    return $dedup
+    if ($ApacheSites) { 
+        foreach ($s in $ApacheSites) {
+            $ru = Add-TrailingSlash $s.url
+            if (-not $seen.ContainsKey($ru)) { 
+                $seen[$ru] = $true
+                $null = $dedup.Add($ru)
+            }
+        }
+    }
+    
+    return @($dedup)
 }
 
 function Get-ExistingIndexMap {
@@ -91,20 +104,37 @@ function Write-AppLog {
 
 function Write-MissingTimestampLog {
     param([hashtable]$CrawlMeta, [string]$LogPath)
-    $missingDirs = @()
+    $missingDirs = [System.Collections.ArrayList]::new()
+    $fileCountMap = @{}
+    
+    # Single pass: collect missing dirs and initialize file counts
     foreach ($k in $CrawlMeta.Keys) {
         $entry = $CrawlMeta[$k]
-        if ($entry.type -eq 'dir' -and -not $entry.ContainsKey('last_modified')) { $missingDirs += $k }
-    }
-    if ($missingDirs.Count -eq 0) { return 0 }
-    $lines = @()
-    foreach ($dirUrl in $missingDirs) {
-        $fileCount = 0
-        foreach ($k in $CrawlMeta.Keys) {
-            if ($CrawlMeta[$k].type -eq 'file' -and $k.StartsWith($dirUrl)) { $fileCount++ }
+        if ($entry.type -eq 'dir' -and -not $entry.ContainsKey('last_modified')) { 
+            $null = $missingDirs.Add($k)
+            $fileCountMap[$k] = 0
         }
-        $lines += "${dirUrl}`t${fileCount}"
     }
+    
+    if ($missingDirs.Count -eq 0) { return 0 }
+    
+    # Second pass: count files only for missing dirs
+    foreach ($k in $CrawlMeta.Keys) {
+        if ($CrawlMeta[$k].type -eq 'file') {
+            foreach ($dirUrl in $missingDirs) {
+                if ($k.StartsWith($dirUrl)) {
+                    $fileCountMap[$dirUrl]++
+                    break
+                }
+            }
+        }
+    }
+    
+    $lines = [System.Collections.ArrayList]::new()
+    foreach ($dirUrl in $missingDirs) {
+        $null = $lines.Add("${dirUrl}`t$($fileCountMap[$dirUrl])")
+    }
+    
     return (Write-AppLog -Path $LogPath -HeaderPrefix 'Missing last_modified directories (URL<TAB>FileCount)' -Entries $lines)
 }
 
@@ -145,14 +175,15 @@ function Get-BaseHost([string]$Url) {
 
 function Get-BackupFiles {
     if (-not (Test-Path $BackupRoot)) { return @() }
-    return @(Get-ChildItem -Path $BackupRoot -File | Sort-Object LastWriteTime -Descending | ForEach-Object { $_.FullName })
+    $files = Get-ChildItem -Path $BackupRoot -File | Sort-Object LastWriteTime -Descending
+    return @($files.FullName)
 }
 
 function Backup-Files {
     param([string[]]$Paths)
     if (-not (Test-Path $BackupRoot)) { New-Item -ItemType Directory -Path $BackupRoot | Out-Null }
     $timestamp = Get-Date -Format 'yyyyMMdd_HHmmss'
-    $backedUp = @()
+    $backedUp = [System.Collections.ArrayList]::new()
     foreach ($p in $Paths) {
         if ($p -and (Test-Path $p)) {
             $leaf = Split-Path $p -Leaf
@@ -160,33 +191,36 @@ function Backup-Files {
             $ext = [System.IO.Path]::GetExtension($leaf)
             $dest = Join-Path $BackupRoot ("${base}${timestamp}${ext}")
             Copy-Item -Path $p -Destination $dest -Force
-            $backedUp += $dest
+            $null = $backedUp.Add($dest)
         }
     }
-    return $backedUp
+    return @($backedUp)
 }
 
 function ConvertTo-SiteList {
     param($List)
-    $normalized = @()
     if (-not $List) { return @() }
     if ($List.PSObject.Properties.Name -contains 'url') {
         $List = @($List)
     }
+    
+    $seen = @{}
+    $dedup = [System.Collections.ArrayList]::new()
+    
     foreach ($item in $List) {
         if (-not ($item.PSObject.Properties.Name -contains 'url')) { continue }
         $u = [string]$item.url
         if (-not $u) { continue }
         $u = Add-TrailingSlash $u
-        $idx = if ($item.PSObject.Properties.Name -contains 'indexed') { [bool]$item.indexed } else { $false }
-        $normalized += [PSCustomObject]@{ url = $u; indexed = $idx }
+        
+        if (-not $seen.ContainsKey($u)) {
+            $seen[$u] = $true
+            $idx = if ($item.PSObject.Properties.Name -contains 'indexed') { [bool]$item.indexed } else { $false }
+            $null = $dedup.Add([PSCustomObject]@{ url = $u; indexed = $idx })
+        }
     }
-    $seen = @{}
-    $dedup = @()
-    foreach ($s in $normalized) {
-        if (-not $seen.ContainsKey($s.url)) { $seen[$s.url] = $true; $dedup += $s }
-    }
-    return $dedup
+    
+    return @($dedup)
 }
 
 function Set-Urls {
@@ -223,23 +257,27 @@ function Get-MergedConfig($Default, $Override) {
 function Get-NormalizedBlockList {
     param([string[]]$List)
     $set = [System.Collections.Generic.HashSet[string]]::new()
+    $variantsList = [System.Collections.ArrayList]::new()
+    
     foreach ($item in $List) {
         if (-not $item) { continue }
         # Generate variants (URL-encoded, space/dash/underscore substitutions)
-        $variants = @()
-        $variants += $item
+        $variantsList.Clear()
+        $null = $variantsList.Add($item)
+        
         try { $decoded = [System.Web.HttpUtility]::UrlDecode($item) } catch { $decoded = $item }
-        if ($decoded -and $decoded -ne $item) { $variants += $decoded }
-        if ($item -match '\+') { $variants += ($item -replace '\+', ' ') }
-        if ($item -match ' ') { $variants += ($item -replace ' ', '+') }
-        if ($item -match '-') { $variants += ($item -replace '-', ' ') }
-        if ($item -match ' ') { $variants += ($item -replace ' ', '-') }
-        if ($item -match '_') { $variants += ($item -replace '_', ' ') }
-        if ($item -match ' ') { $variants += ($item -replace ' ', '_') }
+        if ($decoded -and $decoded -ne $item) { $null = $variantsList.Add($decoded) }
+        
+        if ($item -match '\+') { $null = $variantsList.Add(($item -replace '\+', ' ')) }
+        if ($item -match ' ') { $null = $variantsList.Add(($item -replace ' ', '\+')) }
+        if ($item -match '-') { $null = $variantsList.Add(($item -replace '-', ' ')) }
+        if ($item -match ' ') { $null = $variantsList.Add(($item -replace ' ', '-')) }
+        if ($item -match '_') { $null = $variantsList.Add(($item -replace '_', ' ')) }
+        if ($item -match ' ') { $null = $variantsList.Add(($item -replace ' ', '_')) }
         
         # Process variants in single loop instead of pipeline chain
         $seen = @{}
-        foreach ($v in $variants) {
+        foreach ($v in $variantsList) {
             $normalized = ($v -replace '\s+', ' ').Trim()
             if ($normalized -and -not $seen.ContainsKey($normalized)) {
                 $seen[$normalized] = $true
@@ -346,6 +384,64 @@ function Reset-CrawlStats {
     $script:SkippedBlockedDirs = 0
     $script:BlockedDirUrls = @()
     $script:NoLongerEmptyCount = 0
+}
+
+function Show-Menu {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Title,
+        [Parameter(Mandatory = $true)]
+        [hashtable]$Options,
+        [switch]$HasBack,
+        [switch]$HasQuit
+    )
+    
+    while ($true) {
+        Show-Header $Title
+        
+        foreach ($key in ($Options.Keys | Sort-Object)) {
+            Write-Host "[$key] $($Options[$key].Label)"
+        }
+        
+        if ($HasBack) { Write-Host "[b] Back" }
+        if ($HasQuit) { Write-Host "[q] Quit" }
+        Write-Host ""
+        
+        $choice = Read-Host "Choose an option"
+        $choice = $choice.Trim().ToLowerInvariant()
+        
+        if ($HasBack -and $choice -eq 'b') { return }
+        if ($HasQuit -and $choice -eq 'q') { exit 0 }
+        
+        if ($Options.ContainsKey($choice)) {
+            & $Options[$choice].Action
+        }
+    }
+}
+
+function Get-AllSourcesList {
+    param(
+        [switch]$IncludeIndexed,
+        [switch]$NormalizeUrls
+    )
+    
+    $allSources = [System.Collections.ArrayList]::new()
+    
+    foreach ($s in $H5aiSites) {
+        $url = if ($NormalizeUrls) { Add-TrailingSlash $s.url } else { $s.url }
+        $obj = [PSCustomObject]@{ url = $url; type = 'h5ai' }
+        if ($IncludeIndexed) { $obj | Add-Member -NotePropertyName 'indexed' -NotePropertyValue $s.indexed }
+        $null = $allSources.Add($obj)
+    }
+    
+    foreach ($s in $ApacheSites) {
+        $url = if ($NormalizeUrls) { Add-TrailingSlash $s.url } else { $s.url }
+        $obj = [PSCustomObject]@{ url = $url; type = 'apache' }
+        if ($IncludeIndexed) { $obj | Add-Member -NotePropertyName 'indexed' -NotePropertyValue $s.indexed }
+        $null = $allSources.Add($obj)
+    }
+    
+    return @($allSources)
 }
 
 function Test-IsBlockedUrl {

@@ -55,7 +55,7 @@ function Build-FullUrl {
 
 function Get-ParsedRows {
     param([string]$Html, [string]$BaseUrl, [bool]$IsApache, [string]$ItemType)
-    $results = @()
+    $results = [System.Collections.ArrayList]::new()
     $videoExtensions = $script:Config.VideoExtensions
     
     [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
@@ -90,7 +90,7 @@ function Get-ParsedRows {
         
         $item = [PSCustomObject]@{ Name = $name; Url = $fullUrl; LastModified = $lastModified }
         if ($ItemType -eq 'dir') { $item | Add-Member -NotePropertyName 'IsDir' -NotePropertyValue $true }
-        $results += $item
+        $null = $results.Add($item)
     }
-    return $results
+    return @($results)
 }

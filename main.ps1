@@ -461,9 +461,7 @@ function Remove-DeadLinks {
 function New-SelectiveIndex {
     Show-Header "Selective Index"
     
-    $allSources = @()
-    foreach ($s in $H5aiSites) { $allSources += [PSCustomObject]@{ url = $s.url; type = 'h5ai'; indexed = $s.indexed } }
-    foreach ($s in $ApacheSites) { $allSources += [PSCustomObject]@{ url = $s.url; type = 'apache'; indexed = $s.indexed } }
+    $allSources = Get-AllSourcesList -IncludeIndexed
     
     if ($allSources.Count -eq 0) {
         Write-Host "No source URLs configured in $SourceUrlsPath." -ForegroundColor Yellow
@@ -488,14 +486,14 @@ function New-SelectiveIndex {
     if ($lines.Count -eq 0) { return }
     
     # Parse selected sources
-    $selectedSources = @()
+    $selectedSources = [System.Collections.ArrayList]::new()
     foreach ($line in $lines) {
         $parts = $line -split "`t", 3
         if ($parts.Count -ge 2) {
-            $selectedSources += [PSCustomObject]@{
+            $null = $selectedSources.Add([PSCustomObject]@{
                 url  = $parts[0]
                 type = $parts[1]
-            }
+            })
         }
     }
     
@@ -629,83 +627,31 @@ while ($true) {
         '2' { Invoke-ResumeLastPlayed }
         '3' { Find-WatchHistory }
         '4' {
-            :IndexMenu while ($true) {
-                Show-Header "Manage Index"
-                Write-Host "[1] Build Index"
-                Write-Host "[2] Update Index"
-                Write-Host "[3] Selective Index"
-                Write-Host "[4] Prune Index"
-                Write-Host "[b] Back"
-                Write-Host "[q] Quit"
-                Write-Host ""
-                $sub = Read-Host "Choose an option"
-                switch ($sub.Trim().ToLowerInvariant()) {
-                    '1' { New-FullIndex }
-                    '2' { Update-IncrementalIndex }
-                    '3' { New-SelectiveIndex }
-                    '4' { Remove-DeadLinks }
-                    'b' { break IndexMenu }
-                    'q' { exit 0 }
-                    default { }
-                }
+            Show-Menu -Title "Manage Index" -HasBack -HasQuit -Options @{
+                '1' = @{ Label = 'Build Index'; Action = { New-FullIndex } }
+                '2' = @{ Label = 'Update Index'; Action = { Update-IncrementalIndex } }
+                '3' = @{ Label = 'Selective Index'; Action = { New-SelectiveIndex } }
+                '4' = @{ Label = 'Prune Index'; Action = { Remove-DeadLinks } }
             }
         }
         '5' { Invoke-DownloadSearch }
         '6' {
-            :SourcesMenu while ($true) {
-                Show-Header "Manage Sources"
-                Write-Host "[1] Add Source"
-                Write-Host "[2] Source Explorer"
-                Write-Host "[3] Remove Sources"
-                Write-Host "[4] Purge Sources"
-                Write-Host "[b] Back"
-                Write-Host "[q] Quit"
-                Write-Host ""
-                $sub = Read-Host "Choose an option"
-                switch ($sub.Trim().ToLowerInvariant()) {
-                    '1' { Add-Url }
-                    '2' { Invoke-LinkExplorer }
-                    '3' { Remove-SourceUrl }
-                    '4' { Purge-Sources }
-                    'b' { break SourcesMenu }
-                    'q' { exit 0 }
-                    default { }
-                }
+            Show-Menu -Title "Manage Sources" -HasBack -HasQuit -Options @{
+                '1' = @{ Label = 'Add Source'; Action = { Add-Url } }
+                '2' = @{ Label = 'Source Explorer'; Action = { Invoke-LinkExplorer } }
+                '3' = @{ Label = 'Remove Sources'; Action = { Remove-SourceUrl } }
+                '4' = @{ Label = 'Purge Sources'; Action = { Purge-Sources } }
             }
         }
         '7' {
-            :MiscMenu while ($true) {
-                Show-Header "Miscellaneous"
-                Write-Host "[1] Backup Files"
-                Write-Host "[b] Back"
-                Write-Host "[q] Quit"
-                Write-Host ""
-                $m = Read-Host "Choose an option"
-                switch ($m.Trim().ToLowerInvariant()) {
-                    '1' {
-                        :BackupMenu while ($true) {
-                            Show-Header "Backup Files"
-                            Write-Host "[1] View Files"
-                            Write-Host "[2] Remove Files"
-                            Write-Host "[3] Restore Files"
-                            Write-Host "[b] Back"
-                            Write-Host "[q] Quit"
-                            Write-Host ""
-                            $bm = Read-Host "Choose an option"
-                            switch ($bm.Trim().ToLowerInvariant()) {
-                                '1' { View-BackupFiles }
-                                '2' { Remove-BackupFiles }
-                                '3' { Restore-BackupFiles }
-                                'b' { break BackupMenu }
-                                'q' { exit 0 }
-                                default { }
-                            }
-                        }
+            Show-Menu -Title "Miscellaneous" -HasBack -HasQuit -Options @{
+                '1' = @{ Label = 'Backup Files'; Action = {
+                    Show-Menu -Title "Backup Files" -HasBack -HasQuit -Options @{
+                        '1' = @{ Label = 'View Files'; Action = { View-BackupFiles } }
+                        '2' = @{ Label = 'Remove Files'; Action = { Remove-BackupFiles } }
+                        '3' = @{ Label = 'Restore Files'; Action = { Restore-BackupFiles } }
                     }
-                    'b' { break MiscMenu }
-                    'q' { exit 0 }
-                    default { }
-                }
+                }}
             }
         }
         default { Write-Host "Invalid option. Try again." }
