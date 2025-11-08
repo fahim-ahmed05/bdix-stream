@@ -40,12 +40,11 @@ function Get-AllRootUrls {
 
 function Get-ExistingIndexMap {
     $map = @{}
-    if (Test-Path $MediaIndexPath) {
-        try {
-            $existing = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
-            foreach ($item in $existing) { if ($item.Url) { $map[$item.Url] = $item } }
+    $existing = Read-JsonFile -Path $MediaIndexPath
+    if ($existing) {
+        foreach ($item in $existing) { 
+            if ($item.Url) { $map[$item.Url] = $item } 
         }
-        catch { }
     }
     return $map
 }
@@ -264,6 +263,89 @@ function Get-DirBlockSet {
     $raw = if ($script:Config.DirBlockList) { @($script:Config.DirBlockList) } else { @() }
     if (-not $raw -or $raw.Count -eq 0) { return @() }
     return (Get-NormalizedBlockList -List $raw)
+}
+
+function Read-JsonFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+        [switch]$AsHashtable
+    )
+    if (-not (Test-Path $Path)) { return $null }
+    try {
+        if ($AsHashtable) {
+            return (Get-Content $Path -Raw | ConvertFrom-Json -AsHashtable)
+        }
+        else {
+            return (Get-Content $Path -Raw | ConvertFrom-Json)
+        }
+    }
+    catch {
+        return $null
+    }
+}
+
+function Invoke-SafeWebRequest {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+        [int]$TimeoutSec = 12
+    )
+    try {
+        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec -ErrorAction Stop
+        return $response
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-EffectiveTimestamp {
+    param(
+        [array]$Items
+    )
+    if (-not $Items -or $Items.Count -eq 0) { return $null }
+    
+    $dateTimes = @()
+    foreach ($item in $Items) {
+        if ($item.LastModified -and -not (Test-InvalidTimestamp $item.LastModified)) {
+            $dt = ConvertTo-StrictDateTime $item.LastModified
+            if ($dt) { $dateTimes += $dt }
+        }
+    }
+    
+    if ($dateTimes.Count -gt 0) { 
+        return ($dateTimes | Sort-Object)[-1].ToString('yyyy-MM-dd HH:mm:ss') 
+    }
+    return $null
+}
+
+function Add-SiteUrl {
+    param(
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$SiteObject,
+        [Parameter(Mandatory = $true)]
+        [bool]$IsApache
+    )
+    if ($IsApache) {
+        $script:ApacheSites = @($script:ApacheSites)
+        $script:ApacheSites = @($script:ApacheSites + $SiteObject)
+    }
+    else {
+        $script:H5aiSites = @($script:H5aiSites)
+        $script:H5aiSites = @($script:H5aiSites + $SiteObject)
+    }
+    Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites
+}
+
+function Reset-CrawlStats {
+    $script:NewDirs = 0
+    $script:NewFiles = 0
+    $script:IgnoredDirsSameTimestamp = 0
+    $script:MissingDateDirs = @()
+    $script:SkippedBlockedDirs = 0
+    $script:BlockedDirUrls = @()
+    $script:NoLongerEmptyCount = 0
 }
 
 function Test-IsBlockedUrl {

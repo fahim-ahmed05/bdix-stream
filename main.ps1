@@ -30,12 +30,8 @@ $DefaultConfig = @{
     }
 }
 
-if (Test-Path $SettingsPath) {
-    $UserConfig = Get-Content $SettingsPath -Raw | ConvertFrom-Json -AsHashtable
-}
-else {
-    $UserConfig = @{}
-}
+$UserConfig = Read-JsonFile -Path $SettingsPath -AsHashtable
+if (-not $UserConfig) { $UserConfig = @{} }
 
 $script:Config = Get-MergedConfig $DefaultConfig $UserConfig
 
@@ -60,8 +56,8 @@ $script:jqPath = $_toolPaths.jq
 $script:editPath = $_toolPaths.edit
 
 
-if (Test-Path $SourceUrlsPath) {
-    $UrlData = Get-Content $SourceUrlsPath -Raw | ConvertFrom-Json
+$UrlData = Read-JsonFile -Path $SourceUrlsPath
+if ($UrlData) {
     $H5aiSites = ConvertTo-SiteList -List $UrlData.H5aiSites
     $ApacheSites = ConvertTo-SiteList -List $UrlData.ApacheSites
     Set-Urls -H5ai $H5aiSites -Apache $ApacheSites
@@ -80,12 +76,7 @@ function New-FullIndex {
     $Index = @{}
     $CrawlMeta = @{}
     $Visited = @{}
-    $script:NewDirs = 0
-    $script:NewFiles = 0
-    $script:IgnoredDirsSameTimestamp = 0
-    $script:MissingDateDirs = @()
-    $script:SkippedBlockedDirs = 0
-    $script:BlockedDirUrls = @()
+    Reset-CrawlStats
     $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     $h5List = @($H5aiSites)
@@ -141,10 +132,12 @@ function New-FullIndex {
 
     if ($onlyNew -and (Test-Path $MediaIndexPath)) {
         Write-Host "Merging with existing index..." -ForegroundColor Cyan
-        $existingIndex = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
-        foreach ($e in $existingIndex) { 
-            if (-not $Index.ContainsKey($e.Url)) { 
-                $Index[$e.Url] = $e 
+        $existingIndex = Read-JsonFile -Path $MediaIndexPath
+        if ($existingIndex) {
+            foreach ($e in $existingIndex) { 
+                if (-not $Index.ContainsKey($e.Url)) { 
+                    $Index[$e.Url] = $e 
+                }
             }
         }
     }
@@ -199,12 +192,7 @@ function Update-IncrementalIndex {
     $Index = Get-ExistingIndexMap
 
     $Visited = @{}
-    $script:MissingDateDirs = @()
-    $script:NewDirs = 0
-    $script:NewFiles = 0
-    $script:IgnoredDirsSameTimestamp = 0
-    $script:SkippedBlockedDirs = 0
-    $script:BlockedDirUrls = @()
+    Reset-CrawlStats
     $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
     $h5List = @($H5aiSites)
@@ -396,13 +384,9 @@ function Remove-DeadLinks {
             if ($dirUrl.StartsWith($root)) { $isApache = $true; break }
         }
 
-        try {
-            $response = Invoke-WebRequest -Uri $dirUrl -UseBasicParsing -TimeoutSec 10 -ErrorAction Stop
-            $html = $response.Content
-        }
-        catch {
-            continue
-        }
+        $response = Invoke-SafeWebRequest -Url $dirUrl -TimeoutSec 10
+        if (-not $response) { continue }
+        $html = $response.Content
 
         $processedDirs++
         if ($processedDirs % 10 -eq 0) {
@@ -528,13 +512,7 @@ function New-SelectiveIndex {
     $Index = Get-ExistingIndexMap
     $CrawlMeta = Get-CrawlMeta
     $Visited = @{}
-    $script:NewDirs = 0
-    $script:NewFiles = 0
-    $script:IgnoredDirsSameTimestamp = 0
-    $script:MissingDateDirs = @()
-    $script:SkippedBlockedDirs = 0
-    $script:BlockedDirUrls = @()
-    $script:NoLongerEmptyCount = 0
+    Reset-CrawlStats
     $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     
     Write-Host ""

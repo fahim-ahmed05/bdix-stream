@@ -13,11 +13,11 @@ function Invoke-ExplorerCrawl {
     if ($Depth -lt 0 -or $Visited[$Url]) { return }
     $Visited[$Url] = $true
     if (Test-IsBlockedUrl -Url $Url -BlockSet $global:DirBlockSet) { $script:ExplorerSkippedBlocked++ ; return }
-    try {
-        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 12 -ErrorAction Stop
-        $html = $response.Content
-    }
-    catch { return }
+    
+    $response = Invoke-SafeWebRequest -Url $Url -TimeoutSec 12
+    if (-not $response) { return }
+    $html = $response.Content
+    
     foreach ($item in (& $Parser -Html $html -BaseUrl $Url)) {
         if ($item.IsDir) {
             $dirUrl = Add-TrailingSlash $item.Url

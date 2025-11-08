@@ -12,30 +12,17 @@ function Invoke-IndexCrawl {
     if ($Depth -lt 0 -or $Visited[$Url]) { return }
     $Visited[$Url] = $true
     if (Test-IsBlockedUrl -Url $Url -BlockSet $global:DirBlockSet) { if ($TrackStats) { $script:SkippedBlockedDirs++ ; $script:BlockedDirUrls += $Url } ; return }
-    try {
-        $response = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 12 -ErrorAction Stop
-        $html = $response.Content
-    }
-    catch { return }
+    
+    $response = Invoke-SafeWebRequest -Url $Url -TimeoutSec 12
+    if (-not $response) { return }
+    $html = $response.Content
+    
     $normUrl = Add-TrailingSlash $Url
     $dirs = Get-Dirs -Html $html -BaseUrl $Url -IsApache $IsApache
     $videos = Get-Videos -Html $html -BaseUrl $Url -IsApache $IsApache
     
     # Compute effective directory timestamp from most recent child
-    $dateTimes = @()
-    foreach ($d in $dirs) {
-        if ($d.LastModified -and -not (Test-InvalidTimestamp $d.LastModified)) {
-            $dt = ConvertTo-StrictDateTime $d.LastModified
-            if ($dt) { $dateTimes += $dt }
-        }
-    }
-    foreach ($v in $videos) {
-        if ($v.LastModified -and -not (Test-InvalidTimestamp $v.LastModified)) {
-            $dt = ConvertTo-StrictDateTime $v.LastModified
-            if ($dt) { $dateTimes += $dt }
-        }
-    }
-    $effectiveDirMod = if ($dateTimes.Count -gt 0) { ($dateTimes | Sort-Object)[-1].ToString('yyyy-MM-dd HH:mm:ss') } else { $null }
+    $effectiveDirMod = Get-EffectiveTimestamp -Items ($dirs + $videos)
     
     # Decide whether to reindex: forced, timestamp changed, or new directory
     $shouldCrawlDir = $false
@@ -108,8 +95,8 @@ function Invoke-IndexCrawl {
 }
 
 function Get-CrawlMeta {
-    if (Test-Path $CrawlerStatePath) { return (Get-Content $CrawlerStatePath -Raw | ConvertFrom-Json -AsHashtable) }
-    return @{}
+    $meta = Read-JsonFile -Path $CrawlerStatePath -AsHashtable
+    return if ($meta) { $meta } else { @{} }
 }
 
 function Set-CrawlMeta { param([hashtable]$Meta) $Meta | ConvertTo-Json -Depth 10 -Compress | Set-Content $CrawlerStatePath -Encoding UTF8 }

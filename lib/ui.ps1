@@ -110,7 +110,12 @@ function Invoke-LinkExplorer {
         $newObjects = @()
         foreach ($dir in $chosenSet) { if (-not $existingSet.ContainsKey($dir)) { $newObjects += [PSCustomObject]@{ url = $dir; indexed = $false } } }
         if ($newObjects.Count -eq 0) { Write-Host "No new URLs to add (all already existed)." -ForegroundColor Yellow }
-        else { if ($isApache) { $script:ApacheSites = @($script:ApacheSites); $script:ApacheSites = @($script:ApacheSites + $newObjects) } else { $script:H5aiSites = @($script:H5aiSites); $script:H5aiSites = @($script:H5aiSites + $newObjects) }; Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites; Write-Host "Added $($newObjects.Count) new URL(s) to $SourceUrlsPath" -ForegroundColor Green }
+        else { 
+            foreach ($obj in $newObjects) {
+                Add-SiteUrl -SiteObject $obj -IsApache $isApache
+            }
+            Write-Host "Added $($newObjects.Count) new URL(s) to $SourceUrlsPath" -ForegroundColor Green 
+        }
         Start-Sleep -Seconds 1
     }
 }
@@ -135,9 +140,7 @@ function Add-Url {
         $obj = [PSCustomObject]@{ url = $url; indexed = $false }
         $isApache = $false
         if ($type -match '^(?i)(2|a|apache)$') { $isApache = $true }
-        if ($isApache) { $script:ApacheSites = @($script:ApacheSites); $script:ApacheSites = @($script:ApacheSites + $obj) }
-        else { $script:H5aiSites = @($script:H5aiSites); $script:H5aiSites = @($script:H5aiSites + $obj) }
-        Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites
+        Add-SiteUrl -SiteObject $obj -IsApache $isApache
         Write-Host "URL added (indexed=false) to $SourceUrlsPath" -ForegroundColor Green
         Start-Sleep -Seconds 1
     }
@@ -194,8 +197,8 @@ function Purge-Sources {
     foreach ($src in $allSources) {
         $checkedCount++
         Write-Host "[$checkedCount/$($allSources.Count)] Checking: $($src.url)" -ForegroundColor DarkGray
-        try { $resp = Invoke-WebRequest -Uri $src.url -UseBasicParsing -TimeoutSec 8 -ErrorAction Stop; $ok = ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400) }
-        catch { $ok = $false }
+        $resp = Invoke-SafeWebRequest -Url $src.url -TimeoutSec 8
+        $ok = ($resp -and $resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400)
         if (-not $ok) { $inaccessible += $src }
     }
     Write-Host ""
@@ -207,14 +210,12 @@ function Purge-Sources {
     foreach ($r in $roots) { $rootSet[(Add-TrailingSlash $r)] = $true }
     
     $indexCount = 0; $indexRemove = 0
-    if (Test-Path $MediaIndexPath) {
-        $idx = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
-        if ($idx) { 
-            $indexCount = $idx.Count
-            foreach ($e in $idx) {
-                foreach ($r in $rootSet.Keys) {
-                    if ($e.Url.StartsWith($r)) { $indexRemove++; break }
-                }
+    $idx = Read-JsonFile -Path $MediaIndexPath
+    if ($idx) { 
+        $indexCount = $idx.Count
+        foreach ($e in $idx) {
+            foreach ($r in $rootSet.Keys) {
+                if ($e.Url.StartsWith($r)) { $indexRemove++; break }
             }
         }
     }
@@ -241,19 +242,17 @@ function Purge-Sources {
     if ($backupFiles.Count -gt 0) { Write-Host "Backed up: $($backupFiles -join ', ')" -ForegroundColor Green }
     
     Write-Host "Processing index..." -ForegroundColor Cyan
-    if (Test-Path $MediaIndexPath) {
-        $idx = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json
-        if ($idx) { 
-            $idx = @($idx | Where-Object { 
-                $keep = $true
-                foreach ($r in $rootSet.Keys) {
-                    if ($_.Url.StartsWith($r)) { $keep = $false; break }
-                }
-                $keep
-            })
-        }
-        $idx | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
+    $idx = Read-JsonFile -Path $MediaIndexPath
+    if ($idx) { 
+        $idx = @($idx | Where-Object { 
+            $keep = $true
+            foreach ($r in $rootSet.Keys) {
+                if ($_.Url.StartsWith($r)) { $keep = $false; break }
+            }
+            $keep
+        })
     }
+    $idx | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
     Write-Host "Processing crawler state..." -ForegroundColor Cyan
     $crawlNew = @{}
     foreach ($k in $crawl.Keys) {
@@ -268,7 +267,9 @@ function Purge-Sources {
     $script:H5aiSites = @($H5aiSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     $script:ApacheSites = @($ApacheSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites
-    $idxLeft = 0; if (Test-Path $MediaIndexPath) { $tmp = Get-Content $MediaIndexPath -Raw | ConvertFrom-Json; if ($tmp) { $idxLeft = $tmp.Count } }
+    $idxLeft = 0
+    $tmp = Read-JsonFile -Path $MediaIndexPath
+    if ($tmp) { $idxLeft = $tmp.Count }
     $crawlLeft = (Get-CrawlMeta).Keys.Count
     $srcLeft = ($script:H5aiSites.Count + $script:ApacheSites.Count)
     Write-Host "Purge complete." -ForegroundColor Green
@@ -279,7 +280,8 @@ function Purge-Sources {
 function Add-HistoryEntry {
     param([string]$Name, [string]$Url)
     $entry = [PSCustomObject]@{ Name = $Name; Url = $Url; Time = Get-Date -Format 'yyyy-MM-dd HH:mm:ss' }
-    if (Test-Path $WatchHistoryPath) { $history = Get-Content $WatchHistoryPath -Raw | ConvertFrom-Json } else { $history = @() }
+    $history = Read-JsonFile -Path $WatchHistoryPath
+    if (-not $history) { $history = @() }
     $history = @($entry) + ($history | Where-Object { $_.Url -ne $Url })
     if ($script:Config.HistoryMaxSize -gt 0 -and $history.Count -gt $script:Config.HistoryMaxSize) { $history = $history[0..($script:Config.HistoryMaxSize - 1)] }
     $history | ConvertTo-Json -Compress | Set-Content $WatchHistoryPath -Encoding UTF8
@@ -287,8 +289,7 @@ function Add-HistoryEntry {
 
 function Find-WatchHistory {
     Show-Header "Watch History"
-    if (!(Test-Path $WatchHistoryPath)) { Write-Host "No history file yet." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
-    $history = Get-Content $WatchHistoryPath -Raw | ConvertFrom-Json
+    $history = Read-JsonFile -Path $WatchHistoryPath
     if (!$history -or $history.Count -eq 0) { Write-Host "History is empty." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     $displayLines = foreach ($item in $history) { "$( $item.Name )`t$( $item.Url )" }
     Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
@@ -356,8 +357,9 @@ function Add-HistoryEntry-SafePlay([string]$Name, [string]$Url) { Add-HistoryEnt
 
 function Invoke-ResumeLastPlayed {
     Show-Header "Resume Stream"
-    if (!(Test-Path $WatchHistoryPath)) { Write-Host "No history." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
-    $last = (Get-Content $WatchHistoryPath -Raw | ConvertFrom-Json)[0]
+    $history = Read-JsonFile -Path $WatchHistoryPath
+    if (!$history -or $history.Count -eq 0) { Write-Host "No history." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
+    $last = $history[0]
     if (!$last) { Write-Host "Nothing to resume." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     Write-Host "Resuming: $($last.Name)" -ForegroundColor Green
     Add-HistoryEntry -Name $last.Name -Url $last.Url

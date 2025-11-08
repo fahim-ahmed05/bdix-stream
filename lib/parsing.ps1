@@ -56,7 +56,7 @@ function Build-FullUrl {
 function Get-ParsedRows {
     param([string]$Html, [string]$BaseUrl, [bool]$IsApache, [string]$ItemType)
     $results = @()
-    $videoExtensions = $Config.VideoExtensions
+    $videoExtensions = $script:Config.VideoExtensions
     
     [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
         $row = $_.Value
