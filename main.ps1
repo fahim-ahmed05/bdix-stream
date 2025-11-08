@@ -123,10 +123,20 @@ function New-FullIndex {
 
     Write-Host ""
 
-    if (-not $onlyNew -and (Test-Path $MediaIndexPath)) {
-        $b = Backup-Files -Paths @($MediaIndexPath)
-        if ($b -and $b.Count -gt 0) { Write-Host "Backed up previous index: $($b[0])" -ForegroundColor Yellow }
-        Remove-Item -Path $MediaIndexPath -Force
+    if (-not $onlyNew) {
+        $backupPaths = @()
+        if (Test-Path $MediaIndexPath) { $backupPaths += $MediaIndexPath }
+        if (Test-Path $CrawlerStatePath) { $backupPaths += $CrawlerStatePath }
+        
+        if ($backupPaths.Count -gt 0) {
+            $b = Backup-Files -Paths $backupPaths
+            if ($b -and $b.Count -gt 0) {
+                Write-Host "Backed up previous files: $($b -join ', ')" -ForegroundColor Yellow
+            }
+        }
+        
+        if (Test-Path $MediaIndexPath) { Remove-Item -Path $MediaIndexPath -Force }
+        if (Test-Path $CrawlerStatePath) { Remove-Item -Path $CrawlerStatePath -Force }
     }
 
     if ($onlyNew -and (Test-Path $MediaIndexPath)) {
