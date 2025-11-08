@@ -474,6 +474,163 @@ function Remove-DeadLinks {
     Wait-Return "Press Enter to return..."
 }
 
+function New-SelectiveIndex {
+    Show-Header "Selective Index"
+    
+    $allSources = @()
+    foreach ($s in $H5aiSites) { $allSources += [PSCustomObject]@{ url = $s.url; type = 'h5ai'; indexed = $s.indexed } }
+    foreach ($s in $ApacheSites) { $allSources += [PSCustomObject]@{ url = $s.url; type = 'apache'; indexed = $s.indexed } }
+    
+    if ($allSources.Count -eq 0) {
+        Write-Host "No source URLs configured in $SourceUrlsPath." -ForegroundColor Yellow
+        Wait-Return "Press Enter to return..."
+        return
+    }
+    
+    Write-Host "Tip: press TAB to select/deselect sources and ESC to return." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Display sources with indexed status
+    $displayLines = foreach ($src in $allSources) {
+        $status = if ($src.indexed) { "[INDEXED]" } else { "[NEW]" }
+        "$($src.url)`t$($src.type)`t$status"
+    }
+    
+    $fzfArgs = @('--height=20', '--layout=reverse', '--delimiter=\t', '--with-nth=1,3', '--prompt=Select Sources: ', '--multi')
+    $selected = $displayLines | & $fzfPath @fzfArgs
+    
+    if (!$selected -or $LASTEXITCODE -ne 0) { return }
+    
+    $lines = $selected -split "`n" | Where-Object { $_ }
+    if ($lines.Count -eq 0) { return }
+    
+    # Parse selected sources
+    $selectedSources = @()
+    foreach ($line in $lines) {
+        $parts = $line -split "`t", 3
+        if ($parts.Count -ge 2) {
+            $selectedSources += [PSCustomObject]@{
+                url  = $parts[0]
+                type = $parts[1]
+            }
+        }
+    }
+    
+    if ($selectedSources.Count -eq 0) { return }
+    
+    Write-Host ""
+    Write-Host "Selected $($selectedSources.Count) source(s)." -ForegroundColor Cyan
+    Write-Host ""
+    
+    # Ask for index type
+    $incremental = Read-YesNo -Message "Build incremental index (only changed content)? (Y/n)" -Default 'Y'
+    
+    # Initialize
+    $Index = Get-ExistingIndexMap
+    $CrawlMeta = Get-CrawlMeta
+    $Visited = @{}
+    $script:NewDirs = 0
+    $script:NewFiles = 0
+    $script:IgnoredDirsSameTimestamp = 0
+    $script:MissingDateDirs = @()
+    $script:SkippedBlockedDirs = 0
+    $script:BlockedDirUrls = @()
+    $script:NoLongerEmptyCount = 0
+    $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    
+    Write-Host ""
+    Write-Host "Building index for selected sources..." -ForegroundColor Cyan
+    
+    $siteNum = 0
+    $totalSites = $selectedSources.Count
+    
+    foreach ($src in $selectedSources) {
+        $siteNum++
+        $isApache = ($src.type -eq 'apache')
+        Write-Host "[$siteNum/$totalSites] Indexing: $($src.url)" -ForegroundColor Cyan
+        
+        # For full index mode, force reindex by clearing existing entries for this source
+        $forceSet = @{}
+        if (-not $incremental) {
+            $srcRoot = Add-TrailingSlash $src.url
+            # Mark this root for forced reindexing
+            $forceSet[$srcRoot] = $true
+            
+            # Remove existing entries for this source from Index and CrawlMeta
+            $keysToRemove = @()
+            foreach ($k in $Index.Keys) {
+                if ($k.StartsWith($srcRoot)) { $keysToRemove += $k }
+            }
+            foreach ($k in $keysToRemove) { $Index.Remove($k) }
+            
+            $keysToRemove = @()
+            foreach ($k in $CrawlMeta.Keys) {
+                if ($k.StartsWith($srcRoot)) { $keysToRemove += $k }
+            }
+            foreach ($k in $keysToRemove) { $CrawlMeta.Remove($k) }
+        }
+        
+        Invoke-IndexCrawl -Url $src.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true
+        Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
+    }
+    
+    Write-Host ""
+    Write-Host "Saving index..." -ForegroundColor Cyan
+    $Index.Values | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
+    
+    Write-Host "Saving crawler state..." -ForegroundColor Cyan
+    Set-CrawlMeta -Meta $CrawlMeta
+    
+    $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
+    if ($missingCount -gt 0) {
+        Write-Host "Logged $missingCount directories lacking last_modified to: $MissingTimestampsLogPath" -ForegroundColor Yellow
+    }
+    
+    if ($script:SkippedBlockedDirs -gt 0 -and $script:BlockedDirUrls.Count -gt 0) {
+        $blockedWritten = Write-BlockedDirsLog -BlockedUrls $script:BlockedDirUrls
+        Write-Host "Blocked directories skipped: $script:SkippedBlockedDirs (logged $blockedWritten to $BlockedDirsLogPath)" -ForegroundColor Yellow
+    }
+    
+    # Mark selected sources as indexed
+    foreach ($src in $selectedSources) {
+        if ($src.type -eq 'h5ai') {
+            foreach ($s in $H5aiSites) {
+                if ($s.url -eq $src.url) { $s.indexed = $true; break }
+            }
+        }
+        else {
+            foreach ($s in $ApacheSites) {
+                if ($s.url -eq $src.url) { $s.indexed = $true; break }
+            }
+        }
+    }
+    Set-Urls -H5ai $H5aiSites -Apache $ApacheSites
+    
+    # Count empty directories
+    $emptyDirCount = 0
+    foreach ($k in $CrawlMeta.Keys) {
+        $entry = $CrawlMeta[$k]
+        if ($entry.type -eq 'dir' -and $entry.ContainsKey('empty') -and $entry['empty']) {
+            $emptyDirCount++
+        }
+    }
+    
+    $elapsed = $Stopwatch.Elapsed.ToString('hh\:mm\:ss')
+    $mode = if ($incremental) { "Incremental" } else { "Full" }
+    Write-Host "Selective index ($mode mode) complete." -ForegroundColor Green
+    Write-Host "  Total indexed files: $($Index.Count)" -ForegroundColor Green
+    Write-Host "  New directories: $script:NewDirs" -ForegroundColor Green
+    Write-Host "  New files: $script:NewFiles" -ForegroundColor Green
+    if ($incremental) {
+        Write-Host "  Unchanged directories: $script:IgnoredDirsSameTimestamp" -ForegroundColor Green
+        if ($script:NoLongerEmptyCount -gt 0) { Write-Host "  Previously empty directories now with content: $script:NoLongerEmptyCount" -ForegroundColor Green }
+    }
+    Write-Host "  Empty directories: $emptyDirCount" -ForegroundColor Green
+    if ($script:SkippedBlockedDirs -gt 0) { Write-Host "  Blocked directories skipped: $script:SkippedBlockedDirs" -ForegroundColor Green }
+    Write-Host "  Elapsed time: $elapsed" -ForegroundColor Green
+    Wait-Return "Press Enter to return..."
+}
+
 
 while ($true) {
     Show-Header "Main Menu"
@@ -499,7 +656,8 @@ while ($true) {
                 Show-Header "Manage Index"
                 Write-Host "[1] Build Index"
                 Write-Host "[2] Update Index"
-                Write-Host "[3] Prune Index"
+                Write-Host "[3] Selective Index"
+                Write-Host "[4] Prune Index"
                 Write-Host "[b] Back"
                 Write-Host "[q] Quit"
                 Write-Host ""
@@ -507,7 +665,8 @@ while ($true) {
                 switch ($sub.Trim().ToLowerInvariant()) {
                     '1' { New-FullIndex }
                     '2' { Update-IncrementalIndex }
-                    '3' { Remove-DeadLinks }
+                    '3' { New-SelectiveIndex }
+                    '4' { Remove-DeadLinks }
                     'b' { break IndexMenu }
                     'q' { exit 0 }
                     default { }
