@@ -195,34 +195,92 @@ function Update-IncrementalIndex {
         return
     }
 
-    # Dry-run crawl to discover directories with missing timestamps
-    $tempVisited = @{}
-    $tempMeta = $CrawlMeta.Clone()
-    $tempIndex = @{}
-    $tempMissingDirs = @()
-
-    foreach ($site in $H5aiSites) {
-        $script:MissingDateDirs = @()
-        Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $tempVisited -IndexRef $tempIndex -CrawlMetaRef $tempMeta -ForceReindexSet @{} -TrackStats $false
-        $tempMissingDirs += $script:MissingDateDirs
-    }
-    foreach ($site in $ApacheSites) {
-        $script:MissingDateDirs = @()
-        Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $true -Visited $tempVisited -IndexRef $tempIndex -CrawlMetaRef $tempMeta -ForceReindexSet @{} -TrackStats $false
-        $tempMissingDirs += $script:MissingDateDirs
-    }
-
-    $uniqueMissingDirs = @($tempMissingDirs | Sort-Object -Unique)
-
-    $missingDirFileCounts = @{}
-    foreach ($dirUrl in $uniqueMissingDirs) {
-        $count = 0
-        foreach ($k in $CrawlMeta.Keys) {
-            if ($CrawlMeta[$k].type -eq 'file' -and $k.StartsWith($dirUrl)) { $count++ }
+    # Check existing crawler state for missing timestamps
+    $existingMissingDirs = @()
+    $existingMissingFileCount = 0
+    foreach ($k in $CrawlMeta.Keys) {
+        $entry = $CrawlMeta[$k]
+        if ($entry.type -eq 'dir' -and -not $entry.ContainsKey('last_modified')) {
+            $existingMissingDirs += $k
+            # Count files under this directory
+            foreach ($fk in $CrawlMeta.Keys) {
+                if ($CrawlMeta[$fk].type -eq 'file' -and $fk.StartsWith($k)) {
+                    $existingMissingFileCount++
+                }
+            }
         }
-        $missingDirFileCounts[$dirUrl] = $count
     }
-    $totalFilesInMissingDirs = ($missingDirFileCounts.Values | Measure-Object -Sum).Sum
+
+    if ($existingMissingDirs.Count -gt 0) {
+        Write-Host "Existing crawler state shows:" -ForegroundColor Yellow
+        Write-Host "  Directories with missing timestamps: $($existingMissingDirs.Count)" -ForegroundColor Yellow
+        Write-Host "  Files under those directories: $existingMissingFileCount" -ForegroundColor Yellow
+        Write-Host ""
+        $scanForNew = Read-YesNo -Message "Scan all sources for newly missing timestamps? (y/N)" -Default 'N'
+        if (-not $scanForNew) {
+            Write-Host "Skipping dry-run scan. Will use existing state." -ForegroundColor Cyan
+            $skipDryRun = $true
+            $uniqueMissingDirs = $existingMissingDirs
+        }
+        else {
+            $skipDryRun = $false
+        }
+    }
+    else {
+        Write-Host "No directories with missing timestamps found in existing state." -ForegroundColor Green
+        Write-Host ""
+        $scanAnyway = Read-YesNo -Message "Scan all sources anyway to check for new missing timestamps? (y/N)" -Default 'N'
+        if (-not $scanAnyway) {
+            $skipDryRun = $true
+            $uniqueMissingDirs = @()
+        }
+        else {
+            $skipDryRun = $false
+        }
+    }
+
+    # Dry-run crawl to discover directories with missing timestamps (only if user wants it)
+    if (-not $skipDryRun) {
+        Write-Host "Scanning for missing timestamps..." -ForegroundColor Cyan
+        $tempVisited = @{}
+        $tempMeta = $CrawlMeta.Clone()
+        $tempIndex = @{}
+        $tempMissingDirs = @()
+
+        $siteNum = 0
+        $totalSites = $H5aiSites.Count + $ApacheSites.Count
+        foreach ($site in $H5aiSites) {
+            $siteNum++
+            Write-Host "[$siteNum/$totalSites] Checking: $($site.url)" -ForegroundColor DarkGray
+            $script:MissingDateDirs = @()
+            Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $tempVisited -IndexRef $tempIndex -CrawlMetaRef $tempMeta -ForceReindexSet @{} -TrackStats $false
+            $tempMissingDirs += $script:MissingDateDirs
+        }
+        foreach ($site in $ApacheSites) {
+            $siteNum++
+            Write-Host "[$siteNum/$totalSites] Checking: $($site.url)" -ForegroundColor DarkGray
+            $script:MissingDateDirs = @()
+            Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $true -Visited $tempVisited -IndexRef $tempIndex -CrawlMetaRef $tempMeta -ForceReindexSet @{} -TrackStats $false
+            $tempMissingDirs += $script:MissingDateDirs
+        }
+        Write-Host ""
+
+        $uniqueMissingDirs = @($tempMissingDirs | Sort-Object -Unique)
+    }
+
+    # Calculate file counts for missing directories
+    $missingDirFileCounts = @{}
+    $totalFilesInMissingDirs = 0
+    if ($uniqueMissingDirs.Count -gt 0) {
+        foreach ($dirUrl in $uniqueMissingDirs) {
+            $count = 0
+            foreach ($k in $CrawlMeta.Keys) {
+                if ($CrawlMeta[$k].type -eq 'file' -and $k.StartsWith($dirUrl)) { $count++ }
+            }
+            $missingDirFileCounts[$dirUrl] = $count
+        }
+        $totalFilesInMissingDirs = ($missingDirFileCounts.Values | Measure-Object -Sum).Sum
+    }
 
     $reindexMissing = $false
     if ($uniqueMissingDirs.Count -gt 0) {
@@ -238,6 +296,7 @@ function Update-IncrementalIndex {
         foreach ($u in $uniqueMissingDirs) { $forceSet[$u] = $true }
     }
 
+    Write-Host "Starting incremental update..." -ForegroundColor Cyan
     $Visited = @{}
     foreach ($site in $H5aiSites) {
         Invoke-IndexCrawl -Url $site.url -Depth ($Config.MaxCrawlDepth - 1) -IsApache $false -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $forceSet -TrackStats $true

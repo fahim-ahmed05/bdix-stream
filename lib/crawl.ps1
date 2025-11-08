@@ -54,6 +54,11 @@ function Invoke-IndexCrawl {
     
     if ($shouldCrawlDir) {
         $isNewDir = -not $CrawlMetaRef.ContainsKey($normUrl)
+        
+        # Check if directory is empty (no videos and no subdirectories)
+        $isEmpty = ($videos.Count -eq 0 -and $dirs.Count -eq 0)
+        
+        # Build the metadata entry for this directory
         if ($effectiveDirMod) {
             $CrawlMetaRef[$normUrl] = @{ type = 'dir'; last_modified = $effectiveDirMod }
         }
@@ -61,6 +66,12 @@ function Invoke-IndexCrawl {
             $CrawlMetaRef[$normUrl] = @{ type = 'dir' }
             $script:MissingDateDirs += $normUrl
         }
+        
+        # Add empty flag only if directory is empty
+        if ($isEmpty) {
+            $CrawlMetaRef[$normUrl]['empty'] = $true
+        }
+        
         if ($TrackStats -and $isNewDir) { $script:NewDirs++ }
         
         # Index all video files in this directory
