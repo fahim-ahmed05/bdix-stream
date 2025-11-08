@@ -22,7 +22,10 @@ function Invoke-IndexCrawl {
     $videos = Get-Videos -Html $html -BaseUrl $Url -IsApache $IsApache
     
     # Compute effective directory timestamp from most recent child
-    $effectiveDirMod = Get-EffectiveTimestamp -Items ($dirs + $videos)
+    $allItems = [System.Collections.ArrayList]::new()
+    if ($dirs) { foreach ($d in $dirs) { $null = $allItems.Add($d) } }
+    if ($videos) { foreach ($v in $videos) { $null = $allItems.Add($v) } }
+    $effectiveDirMod = Get-EffectiveTimestamp -Items $allItems
     
     # Decide whether to reindex: forced, timestamp changed, or new directory
     $shouldCrawlDir = $false

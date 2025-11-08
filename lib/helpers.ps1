@@ -366,12 +366,16 @@ function Add-SiteUrl {
         [bool]$IsApache
     )
     if ($IsApache) {
-        $script:ApacheSites = @($script:ApacheSites)
-        $script:ApacheSites = @($script:ApacheSites + $SiteObject)
+        $tempList = [System.Collections.ArrayList]::new()
+        if ($script:ApacheSites) { foreach ($s in $script:ApacheSites) { $null = $tempList.Add($s) } }
+        $null = $tempList.Add($SiteObject)
+        $script:ApacheSites = @($tempList)
     }
     else {
-        $script:H5aiSites = @($script:H5aiSites)
-        $script:H5aiSites = @($script:H5aiSites + $SiteObject)
+        $tempList = [System.Collections.ArrayList]::new()
+        if ($script:H5aiSites) { foreach ($s in $script:H5aiSites) { $null = $tempList.Add($s) } }
+        $null = $tempList.Add($SiteObject)
+        $script:H5aiSites = @($tempList)
     }
     Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites
 }

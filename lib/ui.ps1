@@ -309,7 +309,17 @@ function Add-HistoryEntry {
     $entry = [PSCustomObject]@{ Name = $Name; Url = $Url; Time = Get-Date -Format 'yyyy-MM-dd HH:mm:ss' }
     $history = Read-JsonFile -Path $WatchHistoryPath
     if (-not $history) { $history = @() }
-    $history = @($entry) + ($history | Where-Object { $_.Url -ne $Url })
+    
+    # Build new history list safely
+    $newHistory = [System.Collections.ArrayList]::new()
+    $null = $newHistory.Add($entry)
+    foreach ($item in $history) {
+        if ($item.Url -ne $Url) {
+            $null = $newHistory.Add($item)
+        }
+    }
+    $history = @($newHistory)
+    
     if ($script:Config.HistoryMaxSize -gt 0 -and $history.Count -gt $script:Config.HistoryMaxSize) { $history = $history[0..($script:Config.HistoryMaxSize - 1)] }
     $history | ConvertTo-Json -Compress | Set-Content $WatchHistoryPath -Encoding UTF8
 }
