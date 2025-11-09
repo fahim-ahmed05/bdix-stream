@@ -66,7 +66,10 @@ function Invoke-IndexCrawl {
         }
         else {
             $CrawlMetaRef.dirs[$normUrl] = @{}
-            $script:MissingDateDirs += $normUrl
+            # Track missing timestamp directory with file count (initialized to 0)
+            if (-not $script:MissingDateDirs.ContainsKey($normUrl)) {
+                $script:MissingDateDirs[$normUrl] = 0
+            }
         }
         
         # Add empty flag only if directory is empty
@@ -82,6 +85,11 @@ function Invoke-IndexCrawl {
             if (-not $CrawlMetaRef.files.ContainsKey($v.Url)) {
                 $CrawlMetaRef.files[$v.Url] = $v.Name
                 if ($TrackStats) { $script:NewFiles++ }
+                
+                # Increment file count for missing timestamp directories
+                if ($script:MissingDateDirs.ContainsKey($normUrl)) {
+                    $script:MissingDateDirs[$normUrl]++
+                }
             }
         }
         
@@ -89,7 +97,10 @@ function Invoke-IndexCrawl {
         foreach ($dir in $dirs) {
             $dirUrl = Add-TrailingSlash $dir.Url
             if (Test-IsBlockedUrl -Url $dirUrl -BlockSet $global:DirBlockSet) { if ($TrackStats) { $script:SkippedBlockedDirs++ ; $script:BlockedDirUrls += $dirUrl } ; continue }
-            if (-not $dir.LastModified) { $script:MissingDateDirs += $dirUrl }
+            # Track subdirectories with missing timestamps
+            if (-not $dir.LastModified -and -not $script:MissingDateDirs.ContainsKey($dirUrl)) {
+                $script:MissingDateDirs[$dirUrl] = 0
+            }
             Invoke-IndexCrawl -Url $dirUrl -Depth ($Depth - 1) -IsApache $IsApache -Visited $Visited -CrawlMetaRef $CrawlMetaRef -ForceReindexSet $ForceReindexSet -TrackStats $TrackStats
         }
     }

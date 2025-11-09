@@ -111,34 +111,14 @@ function Write-AppLog {
 function Write-MissingTimestampLog {
     param([hashtable]$CrawlMeta, [string]$LogPath)
     
-    # Use already-collected list from indexing (much faster!)
+    # Use already-tracked data from indexing (O(1) - instant!)
     if ($script:MissingDateDirs.Count -eq 0) { return 0 }
     
-    $missingDirs = $script:MissingDateDirs
-    $fileCountMap = @{}
-    
-    # Initialize counts
-    foreach ($dirUrl in $missingDirs) {
-        $fileCountMap[$dirUrl] = 0
-    }
-    
-    # Sort missing dirs by length descending for more efficient matching
-    $sortedMissingDirs = $missingDirs | Sort-Object -Property Length -Descending
-    
-    # Count files under missing dirs (optimized to avoid nested loop)
-    foreach ($fileUrl in $CrawlMeta.files.Keys) {
-        # Check longest paths first for faster matching
-        foreach ($dirUrl in $sortedMissingDirs) {
-            if ($fileUrl.StartsWith($dirUrl)) {
-                $fileCountMap[$dirUrl]++
-                break
-            }
-        }
-    }
-    
+    # Data is already computed during indexing, just format it
     $lines = [System.Collections.ArrayList]::new()
-    foreach ($dirUrl in $missingDirs) {
-        $null = $lines.Add("${dirUrl}`t$($fileCountMap[$dirUrl])")
+    foreach ($dirUrl in $script:MissingDateDirs.Keys) {
+        $fileCount = $script:MissingDateDirs[$dirUrl]
+        $null = $lines.Add("${dirUrl}`t${fileCount}")
     }
     
     return (Write-AppLog -Path $LogPath -HeaderPrefix 'Missing last_modified directories (URL<TAB>FileCount)' -Entries $lines)
@@ -148,19 +128,24 @@ function Write-IssueDirs {
     param([hashtable]$CrawlMeta)
     
     # Collect problematic directories: missing timestamp OR empty
+    # Use already-tracked data from indexing for missing timestamps
     $issues = [System.Collections.ArrayList]::new()
-    $fileCountMap = @{}
     
-    # First pass: identify problematic directories
-    $problematicDirs = [System.Collections.ArrayList]::new()
+    # Combine missing timestamp dirs and empty dirs
+    $problematicDirs = @{}
+    
+    # Add missing timestamp directories (already have file counts!)
+    foreach ($dirUrl in $script:MissingDateDirs.Keys) {
+        $problematicDirs[$dirUrl] = $script:MissingDateDirs[$dirUrl]
+    }
+    
+    # Add empty directories (file count is always 0)
     foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
         $entry = $CrawlMeta.dirs[$dirUrl]
-        $hasTimestamp = $entry.ContainsKey('last_modified')
         $isEmpty = $entry.ContainsKey('empty') -and $entry['empty']
         
-        if (-not $hasTimestamp -or $isEmpty) {
-            $null = $problematicDirs.Add($dirUrl)
-            $fileCountMap[$dirUrl] = 0
+        if ($isEmpty -and -not $problematicDirs.ContainsKey($dirUrl)) {
+            $problematicDirs[$dirUrl] = 0
         }
     }
     
@@ -170,25 +155,12 @@ function Write-IssueDirs {
         return 0
     }
     
-    # Sort by length descending for efficient file counting
-    $sortedDirs = $problematicDirs | Sort-Object -Property Length -Descending
-    
-    # Count files under each problematic directory
-    foreach ($fileUrl in $CrawlMeta.files.Keys) {
-        foreach ($dirUrl in $sortedDirs) {
-            if ($fileUrl.StartsWith($dirUrl)) {
-                $fileCountMap[$dirUrl]++
-                break
-            }
-        }
-    }
-    
-    # Build issue objects
-    foreach ($dirUrl in $problematicDirs) {
+    # Build issue objects using already-computed file counts
+    foreach ($dirUrl in $problematicDirs.Keys) {
         $entry = $CrawlMeta.dirs[$dirUrl]
         $obj = [PSCustomObject]@{
             url = $dirUrl
-            files = $fileCountMap[$dirUrl]
+            files = $problematicDirs[$dirUrl]
         }
         
         # Add timestamp if it exists
@@ -511,7 +483,7 @@ function Reset-CrawlStats {
     $script:NewDirs = 0
     $script:NewFiles = 0
     $script:IgnoredDirsSameTimestamp = 0
-    $script:MissingDateDirs = @()
+    $script:MissingDateDirs = @{}  # Changed to hashtable: URL -> file count
     $script:SkippedBlockedDirs = 0
     $script:BlockedDirUrls = @()
     $script:NoLongerEmptyCount = 0
