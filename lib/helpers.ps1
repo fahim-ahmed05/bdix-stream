@@ -499,37 +499,6 @@ function Write-BlockedDirsLog {
     return (Write-AppLog -Path $BlockedDirsLogPath -HeaderPrefix 'Blocked directories' -Entries $BlockedUrls)
 }
 
-function Invoke-ForEachSource {
-    param(
-        [array]$H5aiList,
-        [array]$ApacheList,
-        [scriptblock]$Action,
-        [bool]$ShowProgress = $true
-    )
-    $siteNum = 0
-    $totalSites = $H5aiList.Count + $ApacheList.Count
-    
-    foreach ($site in $H5aiList) {
-        $siteNum++
-        if ($ShowProgress) {
-            & $Action -Site $site -IsApache $false -SiteNum $siteNum -TotalSites $totalSites
-        }
-        else {
-            & $Action -Site $site -IsApache $false
-        }
-    }
-    
-    foreach ($site in $ApacheList) {
-        $siteNum++
-        if ($ShowProgress) {
-            & $Action -Site $site -IsApache $true -SiteNum $siteNum -TotalSites $totalSites
-        }
-        else {
-            & $Action -Site $site -IsApache $true
-        }
-    }
-}
-
 function Invoke-Fzf {
     param(
         [Parameter(Mandatory = $true)]

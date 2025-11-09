@@ -473,8 +473,6 @@ function Invoke-SearchInteraction {
 function Invoke-StreamSearch { Invoke-SearchInteraction -Mode Stream }
 function Invoke-DownloadSearch { Invoke-SearchInteraction -Mode Download }
 
-function Add-HistoryEntry-SafePlay([string]$Name, [string]$Url) { Add-HistoryEntry -Name $Name -Url $Url; & $script:Config.MediaPlayer $Url }
-
 # Unified backup file operations handler
 function Invoke-BackupIndexStream {
     param([string]$BackupFilePath, [string]$InitialQuery = '')
