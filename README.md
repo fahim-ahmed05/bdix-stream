@@ -36,17 +36,20 @@ The first time, it will create a settings file. You can change things like where
 
 ```json
 {
-  "MediaPlayer": "mpv",
-  "DownloadPath": "$PSScriptRoot\\downloads",
-  "MaxCrawlDepth": 9,
-  "HistoryMaxSize": 50,
-  "DirBlockList": ["lost found", "software", "games", "e book"],
-  "Tools": {
-    "fzf": "",
-    "aria2c": "",
-    "jq": "",
-    "edit": ""
-  }
+   "DownloadPath": "$PSScriptRoot\\downloads",
+   "MediaPlayer": "mpv",
+   "MediaPlayerFlags": [
+      "--save-position-on-quit",
+      "--watch-later-options=start,volume,mute"
+   ],
+   "VideoExtensions": [".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".m4v"],
+   "DirBlockList": ["lost found", "software", "games", "e book", "ebooks"],
+   "Tools": {
+      "fzf": "",
+      "aria2c": "",
+      "jq": "",
+      "edit": ""
+   }
 }
 ```
 
@@ -71,21 +74,42 @@ Double-click the shortcut to start the script anytime.
 
 The script has a simple menu. Use the number keys or letters to choose:
 
-- **Stream Media**: Search and play videos online.
-- **Resume Last**: Play the last thing you watched.
-- **History**: See what you've watched before.
-- **Manage Index**: Build a list of available media (do this first).
-- **Download**: Save files to your computer.
-- **Manage Sources**: Add or remove websites to search.
-- **Backups**: Save or restore your data.
+- **[1] Network Stream**: Search and play videos online from your indexed sources.
+- **[2] Resume Stream**: Quickly resume the last video you watched.
+- **[3] Watch History**: Browse and replay your watch history.
+- **[4] Manage Index**: Build, update, or selectively index media sources.
+  - Build Index: Create a fresh index of all configured sources.
+  - Update Index: Incrementally update existing index with changes.
+  - Selective Index: Index only specific sources you choose.
+  - Prune Index: Remove dead links from the index.
+- **[5] Download Media**: Search and download videos to your computer.
+- **[6] Manage Sources**: Add new sources or remove existing ones.
+  - Add Source: Add new H5ai or Apache directory servers.
+  - Source Explorer: Browse and discover directories without indexing.
+  - Remove Sources: Remove sources from your list.
+  - Purge Sources: Remove inaccessible sources automatically.
+- **[7] Miscellaneous**: Manage files, backups, and logs.
+  - Current Files: View, remove, or backup settings and data files.
+  - Backup Files: View, remove, or restore backup files.
+  - Log Files: View or remove log files.
+- **[q] Quit**: Exit the application.
 
 Type to search, press Enter to select, and 'b' to go back or 'q' to quit.
 
 ## Help
 
 - If it says a tool is missing, make sure you installed everything from the install step.
-- No videos showing? Go to "Manage Index" and build the index first.
-- Slow? It might take time to scan websites.
+- No videos showing? Go to "Manage Index → Build Index" first to scan your sources.
+- Want to add sources? Use "Source Explorer" to browse directories and add them.
+- Playback not resuming? Check that `MediaPlayerFlags` is set in your settings.json.
+- Slow indexing? Use "Update Index" instead of rebuilding from scratch.
+- Need to stream from backups? Go to "Miscellaneous → Backup Files → View Files" and select a crawler-state backup.
+
+**Performance Tips**:
+- Use "Update Index" for quick updates instead of full rebuilds
+- Use "Selective Index" to index only specific sources
+- The script saves progress during indexing - you can safely resume if interrupted
+- Empty directories are automatically tracked and skipped
 
 ## Support
 
