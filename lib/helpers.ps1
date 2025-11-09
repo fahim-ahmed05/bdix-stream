@@ -179,6 +179,17 @@ function Get-BackupFiles {
     return @($files.FullName)
 }
 
+function Get-CurrentFiles {
+    $files = [System.Collections.ArrayList]::new()
+    $filePaths = @($SettingsPath, $SourceUrlsPath, $MediaIndexPath, $WatchHistoryPath, $CrawlerStatePath)
+    foreach ($path in $filePaths) {
+        if (Test-Path $path) {
+            $null = $files.Add($path)
+        }
+    }
+    return @($files)
+}
+
 function Backup-Files {
     param([string[]]$Paths)
     if (-not (Test-Path $BackupRoot)) { New-Item -ItemType Directory -Path $BackupRoot | Out-Null }

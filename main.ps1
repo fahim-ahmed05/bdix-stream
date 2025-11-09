@@ -620,7 +620,14 @@ while ($true) {
         }
         '7' {
             Show-Menu -Title "Miscellaneous" -HasBack -HasQuit -Options @{
-                '1' = @{ Label = 'Backup Files'; Action = {
+                '1' = @{ Label = 'Current Files'; Action = {
+                    Show-Menu -Title "Current Files" -HasBack -HasQuit -Options @{
+                        '1' = @{ Label = 'View Files'; Action = { Show-CurrentFiles } }
+                        '2' = @{ Label = 'Remove Files'; Action = { Remove-CurrentFiles } }
+                        '3' = @{ Label = 'Backup Files'; Action = { Backup-CurrentFiles } }
+                    }
+                }}
+                '2' = @{ Label = 'Backup Files'; Action = {
                     Show-Menu -Title "Backup Files" -HasBack -HasQuit -Options @{
                         '1' = @{ Label = 'View Files'; Action = { Show-BackupFiles } }
                         '2' = @{ Label = 'Remove Files'; Action = { Remove-BackupFiles } }

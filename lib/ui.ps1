@@ -393,43 +393,126 @@ function Invoke-DownloadSearch { Invoke-SearchInteraction -Mode Download }
 function Add-HistoryEntry-SafePlay([string]$Name, [string]$Url) { Add-HistoryEntry -Name $Name -Url $Url; & $script:Config.MediaPlayer $Url }
 
 # Unified backup file operations handler
-function Invoke-BackupFileOperation {
+function Invoke-BackupIndexStream {
+    param([string]$BackupFilePath, [string]$InitialQuery = '')
+    
+    Show-Header "Backup Index Stream"
+    Write-Host "Streaming from: $(Split-Path $BackupFilePath -Leaf)" -ForegroundColor Cyan
+    Write-Host "Tip: press ESC to return to backup files." -ForegroundColor Yellow
+    Write-Host ""
+    
+    if (!(Test-Path $BackupFilePath)) { 
+        Write-Host "Backup file not found: $BackupFilePath" -ForegroundColor Red
+        Wait-Return "Press Enter to return..."
+        return
+    }
+    
+    $jqQuery = '.[] | "\(.Name // "-" )\t\(.Url)"'
+    $rawLines = Get-Content $BackupFilePath -Raw | & $script:jqPath -r $jqQuery
+    if (!$rawLines) { 
+        Write-Host "Backup index is empty." -ForegroundColor Red
+        Wait-Return "Press Enter to return..."
+        return
+    }
+    
+    $lastQuery = $InitialQuery
+    while ($true) {
+        $selected = Invoke-Fzf -InputData $rawLines -Prompt 'Search: ' -WithNth '1' -Height 20 -Delimiter "`t" -Query $lastQuery -PrintQuery $true
+        if (!$selected) { return }
+        
+        $outLines = $selected -split "`n" | Where-Object { $_ }
+        if ($outLines.Count -ge 1) { $lastQuery = $outLines[0] }
+        if ($outLines.Count -ge 2) { $selected = $outLines[1] } else { if ($LASTEXITCODE -ne 0) { return } else { continue } }
+        
+        if ($LASTEXITCODE -ne 0) { return }
+        
+        $parts = $selected -split "`t", 2
+        if ($parts.Count -lt 2) { continue }
+        $url = $parts[1]
+        $name = if ($parts[0] -ne "-") { $parts[0] } else { [System.IO.Path]::GetFileName($url) }
+        
+        Write-Host "Streaming: $name" -ForegroundColor Green
+        Add-HistoryEntry -Name $name -Url $url
+        & $script:Config.MediaPlayer $url
+        
+        # Return to search with last query
+        Show-Header "Backup Index Stream"
+        Write-Host "Streaming from: $(Split-Path $BackupFilePath -Leaf)" -ForegroundColor Cyan
+        Write-Host "Tip: press ESC to return to backup files." -ForegroundColor Yellow
+        Write-Host ""
+    }
+}
+
+# Unified file operation handler for both current and backup files
+function Invoke-FileOperation {
     param(
         [Parameter(Mandatory)]
-        [ValidateSet('view', 'remove', 'restore')]
-        [string]$Mode
+        [ValidateSet('view', 'remove', 'restore', 'backup')]
+        [string]$Mode,
+        
+        [Parameter(Mandatory)]
+        [ValidateSet('current', 'backup')]
+        [string]$FileSource
     )
     
     $titleMap = @{
-        'view' = 'View Backup Files'
-        'remove' = 'Remove Backup Files'
-        'restore' = 'Restore Backup Files'
+        'view-current' = 'View Current Files'
+        'view-backup' = 'View Backup Files'
+        'remove-current' = 'Remove Current Files'
+        'remove-backup' = 'Remove Backup Files'
+        'restore-backup' = 'Restore Backup Files'
+        'backup-current' = 'Backup Current Files'
     }
     
     $promptMap = @{
-        'view' = 'Backup: '
-        'remove' = 'Backups:'
-        'restore' = 'Restore: '
+        'view-current' = 'File: '
+        'view-backup' = 'Backup: '
+        'remove-current' = 'Files:'
+        'remove-backup' = 'Backups:'
+        'restore-backup' = 'Restore: '
+        'backup-current' = 'Backup: '
     }
+    
+    $key = "$Mode-$FileSource"
+    $title = $titleMap[$key]
+    $prompt = $promptMap[$key]
     
     if ($Mode -eq 'view') {
         # View mode - loop for continuous viewing
         while ($true) {
-            Show-Header $titleMap[$Mode]
-            $files = Get-BackupFiles
+            Show-Header $title
+            $files = if ($FileSource -eq 'backup') { Get-BackupFiles } else { Get-CurrentFiles }
             if ($files.Count -eq 0) {
-                Write-Host "No backup files found." -ForegroundColor Yellow
+                $msg = if ($FileSource -eq 'backup') { "No backup files found." } else { "No current files found." }
+                Write-Host $msg -ForegroundColor Yellow
                 Wait-Return "Press Enter to return..."
                 return
             }
-            Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
+            
+            if ($FileSource -eq 'backup') {
+                Write-Host "Tip: Select media-index backup to stream, other files to edit. ESC to return." -ForegroundColor Yellow
+            } else {
+                Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
+            }
             Write-Host ""
+            
             $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
-            $selected = Invoke-Fzf -InputData $display -Prompt $promptMap[$Mode] -WithNth '1' -Height 20 -Delimiter "`t"
+            $selected = Invoke-Fzf -InputData $display -Prompt $prompt -WithNth '1' -Height 20 -Delimiter "`t"
             if (!$selected -or $LASTEXITCODE -ne 0) { return }
             $parts = $selected -split "`t", 2
             if ($parts.Count -lt 2) { continue }
             $path = $parts[1]
+            $filename = Split-Path $path -Leaf
+            
+            # Check if this is a media-index backup file (only for backups, not current)
+            if ($FileSource -eq 'backup' -and $filename -match '^media-index\d{8}_\d{6}\.json$') {
+                # Stream from backup index
+                Invoke-BackupIndexStream -BackupFilePath $path
+                # After streaming, return to backup file list
+                continue
+            }
+            
+            # For other files (or current media-index), open in editor
             if (Test-Path $path) { & $script:editPath $path }
             else {
                 Write-Host "File not found: $path" -ForegroundColor Red
@@ -439,8 +522,9 @@ function Invoke-BackupFileOperation {
     }
     elseif ($Mode -eq 'remove') {
         # Remove mode
-        Remove-SelectableItems -Title $titleMap[$Mode] -Prompt $promptMap[$Mode] -GetItemsScript {
-            foreach ($f in (Get-BackupFiles)) { (Split-Path $f -Leaf) + "`t" + $f }
+        Remove-SelectableItems -Title $title -Prompt $prompt -GetItemsScript {
+            $files = if ($FileSource -eq 'backup') { Get-BackupFiles } else { Get-CurrentFiles }
+            foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
         } -RemoveScript {
             param($selectedLines)
             $removeList = [System.Collections.ArrayList]::new()
@@ -448,15 +532,47 @@ function Invoke-BackupFileOperation {
                 $p = ($l -split "`t", 2)
                 if ($p.Count -ge 2) { $null = $removeList.Add($p[1]) } 
             }
-            $confirm = Read-YesNo -Message "Remove $($removeList.Count) backup file(s)? (y/N)" -Default 'N'
+            $itemType = if ($FileSource -eq 'backup') { "backup file(s)" } else { "current file(s)" }
+            $confirm = Read-YesNo -Message "Remove $($removeList.Count) $itemType? (y/N)" -Default 'N'
             if (-not $confirm) { return 0 }
             foreach ($r in $removeList) { if (Test-Path $r) { Remove-Item -Path $r -Force } }
             return $removeList.Count
         }
     }
-    else {
-        # Restore mode
-        Show-Header $titleMap[$Mode]
+    elseif ($Mode -eq 'backup') {
+        # Backup current files to backup folder
+        Show-Header $title
+        $files = Get-CurrentFiles
+        if (-not $files -or $files.Count -eq 0) { 
+            Write-Host "No current files found." -ForegroundColor Yellow
+            Wait-Return "Press Enter to return..."
+            return
+        }
+        Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
+        Write-Host "" 
+        $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
+        $selected = Invoke-Fzf -InputData $display -Prompt $prompt -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
+        if (!$selected -or $LASTEXITCODE -ne 0) { return }
+        $lines = $selected -split "`n" | Where-Object { $_ }
+        if ($lines.Count -eq 0) { return }
+        $backupList = [System.Collections.ArrayList]::new()
+        foreach ($l in $lines) { 
+            $p = ($l -split "`t", 2)
+            if ($p.Count -ge 2) { $null = $backupList.Add($p[1]) } 
+        }
+        $confirm = Read-YesNo -Message "Backup $($backupList.Count) file(s)? (y/N)" -Default 'N'
+        if (-not $confirm) { return }
+        
+        $backedUp = Backup-Files -Paths $backupList
+        Write-Host "Backed up $($backedUp.Count) file(s) to backup folder." -ForegroundColor Green
+        foreach ($b in $backedUp) {
+            Write-Host "  $(Split-Path $b -Leaf)" -ForegroundColor DarkGray
+        }
+        Wait-Return "Press Enter to return..."
+    }
+    elseif ($Mode -eq 'restore') {
+        # Restore mode (only for backup files)
+        Show-Header $title
         $files = Get-BackupFiles
         if (-not $files -or $files.Count -eq 0) { 
             Write-Host "No backup files found." -ForegroundColor Yellow
@@ -466,7 +582,7 @@ function Invoke-BackupFileOperation {
         Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
         Write-Host "" 
         $display = foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
-        $selected = Invoke-Fzf -InputData $display -Prompt $promptMap[$Mode] -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
+        $selected = Invoke-Fzf -InputData $display -Prompt $prompt -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
         if (!$selected -or $LASTEXITCODE -ne 0) { return }
         $lines = $selected -split "`n" | Where-Object { $_ }
         if ($lines.Count -eq 0) { return }
@@ -514,6 +630,24 @@ function Invoke-BackupFileOperation {
     }
 }
 
+function Invoke-BackupFileOperation {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('view', 'remove', 'restore')]
+        [string]$Mode
+    )
+    Invoke-FileOperation -Mode $Mode -FileSource 'backup'
+}
+
+function Invoke-CurrentFileOperation {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('view', 'remove', 'backup')]
+        [string]$Mode
+    )
+    Invoke-FileOperation -Mode $Mode -FileSource 'current'
+}
+
 # Wrapper functions for backwards compatibility
 function Show-BackupFiles {
     Invoke-BackupFileOperation -Mode 'view'
@@ -525,6 +659,18 @@ function Remove-BackupFiles {
 
 function Restore-BackupFiles {
     Invoke-BackupFileOperation -Mode 'restore'
+}
+
+function Show-CurrentFiles {
+    Invoke-CurrentFileOperation -Mode 'view'
+}
+
+function Remove-CurrentFiles {
+    Invoke-CurrentFileOperation -Mode 'remove'
+}
+
+function Backup-CurrentFiles {
+    Invoke-CurrentFileOperation -Mode 'backup'
 }
 
 function Invoke-ResumeLastPlayed {
