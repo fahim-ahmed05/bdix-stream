@@ -155,7 +155,7 @@ function Invoke-LinkExplorer {
         
         $sortedDirs = $finalDirs | Sort-Object
         $leafDirs = $nonEmptyLeafDirs
-        Write-Host "Total directories discovered: $($nonEmptyDirs.Count)" -ForegroundColor Green
+        Write-Host "Total directories discovered: $($finalDirs.Count)" -ForegroundColor Green
         Write-Host "Leaf directories: $($leafDirs.Count)" -ForegroundColor Green
         if ($script:ExplorerSkippedBlocked -gt 0) { Write-Host "Blocked directories filtered: $script:ExplorerSkippedBlocked" -ForegroundColor Green }
         if ($emptyCount -gt 0) { Write-Host "Empty directories filtered: $emptyCount" -ForegroundColor Green }

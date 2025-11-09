@@ -16,7 +16,6 @@ function Show-Header {
 $DataDir = Join-Path (Split-Path $PSScriptRoot -Parent) 'data'
 $SettingsPath = Join-Path $DataDir 'settings.json'
 $SourceUrlsPath = Join-Path $DataDir 'source-urls.json'
-$MediaIndexPath = Join-Path $DataDir 'media-index.json'
 $WatchHistoryPath = Join-Path $DataDir 'watch-history.json'
 $CrawlerStatePath = Join-Path $DataDir 'crawler-state.json'
 $IndexProgressPath = Join-Path $DataDir 'index-progress.json'
