@@ -298,6 +298,21 @@ function Invoke-IndexOperation {
     Reset-CrawlStats
     $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     
+    # Handle backup for build mode (BEFORE any processing)
+    if ($Mode -eq 'build' -and -not $onlyNew -and -not $resuming) {
+        $backupPaths = [System.Collections.ArrayList]::new()
+        if (Test-Path $MediaIndexPath) { $null = $backupPaths.Add($MediaIndexPath) }
+        if (Test-Path $CrawlerStatePath) { $null = $backupPaths.Add($CrawlerStatePath) }
+        
+        if ($backupPaths.Count -gt 0) {
+            $b = Backup-Files -Paths $backupPaths
+            if ($b -and $b.Count -gt 0) {
+                Write-Host "Backed up previous files: $($b -join ', ')" -ForegroundColor Yellow
+                Write-Host ""
+            }
+        }
+    }
+    
     # Load or create index and crawler state
     $loadExisting = ($Mode -eq 'update') -or ($isIncremental) -or ($onlyNew)
     if ($loadExisting) {
@@ -380,23 +395,6 @@ function Invoke-IndexOperation {
     }
     
     Write-Host ""
-    
-    # Handle backup for build mode
-    if ($Mode -eq 'build' -and -not $onlyNew) {
-        $backupPaths = [System.Collections.ArrayList]::new()
-        if (Test-Path $MediaIndexPath) { $null = $backupPaths.Add($MediaIndexPath) }
-        if (Test-Path $CrawlerStatePath) { $null = $backupPaths.Add($CrawlerStatePath) }
-        
-        if ($backupPaths.Count -gt 0) {
-            $b = Backup-Files -Paths $backupPaths
-            if ($b -and $b.Count -gt 0) {
-                Write-Host "Backed up previous files: $($b -join ', ')" -ForegroundColor Yellow
-            }
-        }
-        
-        if (Test-Path $MediaIndexPath) { Remove-Item -Path $MediaIndexPath -Force }
-        if (Test-Path $CrawlerStatePath) { Remove-Item -Path $CrawlerStatePath -Force }
-    }
     
     # Merge with existing index for build mode with onlyNew
     if ($Mode -eq 'build' -and $onlyNew -and (Test-Path $MediaIndexPath)) {

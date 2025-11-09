@@ -602,7 +602,7 @@ function Save-IndexProgress {
         }
     }
     
-    $progress | ConvertTo-Json -Depth 10 | Set-Content $IndexProgressPath -Encoding UTF8
+    $progress | ConvertTo-Json -Depth 10 -Compress | Set-Content $IndexProgressPath -Encoding UTF8
 }
 
 function Get-IndexProgress {
