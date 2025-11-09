@@ -39,7 +39,8 @@ function Invoke-LinkExplorer {
         }
         $url = Add-TrailingSlash $url
         $type = Read-Host "Server type? (1) h5ai / (2) Apache [default: h5ai]"
-        $parser = if ($type -eq '2') { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $true } } else { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $false } }
+        $isApache = ($type -eq '2')
+        $parser = if ($isApache) { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $true } } else { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $false } }
         $maxDepth = [Math]::Min($script:Config.MaxCrawlDepth, 9)
         do {
             $depthInput = Read-Host "Crawl depth (1-$maxDepth) [default: 2]"
@@ -81,8 +82,39 @@ function Invoke-LinkExplorer {
             continue
         }
         
+        # Check for empty directories and filter them out
+        Write-Host "Checking for empty directories..." -ForegroundColor Cyan
+        $nonEmptyDirs = [System.Collections.ArrayList]::new()
+        $emptyCount = 0
+        foreach ($dir in $filteredDirs) {
+            $response = Invoke-SafeWebRequest -Url $dir -TimeoutSec 10
+            if (-not $response) { continue }
+            $html = $response.Content
+            
+            $hasContent = $false
+            $dirs = Get-Dirs -Html $html -BaseUrl $dir -IsApache $isApache
+            $videos = Get-Videos -Html $html -BaseUrl $dir -IsApache $isApache
+            
+            if ($dirs.Count -gt 0 -or $videos.Count -gt 0) {
+                $hasContent = $true
+            }
+            
+            if ($hasContent) {
+                $null = $nonEmptyDirs.Add($dir)
+            }
+            else {
+                $emptyCount++
+            }
+        }
+        
+        if ($nonEmptyDirs.Count -eq 0) {
+            Write-Host "No non-empty directories found after filtering." -ForegroundColor Yellow
+            Start-Sleep -Seconds 1
+            continue
+        }
+        
         # Optimize leaf directory finding with sorted array and prefix checking
-        $sortedDirs = $filteredDirs | Sort-Object
+        $sortedDirs = $nonEmptyDirs | Sort-Object
         $leafDirs = [System.Collections.ArrayList]::new()
         for ($i = 0; $i -lt $sortedDirs.Count; $i++) {
             $dir = $sortedDirs[$i]
@@ -106,22 +138,53 @@ function Invoke-LinkExplorer {
             Start-Sleep -Seconds 1
             continue
         }
-        Write-Host "Leaf directories discovered: $($leafDirs.Count)" -ForegroundColor Green
+        Write-Host "Total directories discovered: $($nonEmptyDirs.Count)" -ForegroundColor Green
+        Write-Host "Leaf directories: $($leafDirs.Count)" -ForegroundColor Green
         if ($script:ExplorerSkippedBlocked -gt 0) { Write-Host "Blocked directories filtered: $script:ExplorerSkippedBlocked" -ForegroundColor Green }
-        Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
+        if ($emptyCount -gt 0) { Write-Host "Empty directories filtered: $emptyCount" -ForegroundColor Green }
+        
         Write-Host ""
-        $displayLines = foreach ($dir in $leafDirs) { "$( $dir )`t$( $decodedMap[$dir] )" }
-        $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Select: ' -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
-        if (!$selected -or $LASTEXITCODE -ne 0) { continue }
-        $lines = $selected -split "`n" | Where-Object { $_ }
-        $chosenSet = [System.Collections.ArrayList]::new()
-        foreach ($line in $lines) { 
-            $parts = $line -split "`t", 2
-            if ($parts.Count -ge 1) { $null = $chosenSet.Add((Add-TrailingSlash $parts[0])) } 
+        Write-Host "Leaf directories found:" -ForegroundColor Cyan
+        foreach ($dir in $leafDirs) {
+            Write-Host "  $dir" -ForegroundColor DarkGray
         }
-        if ($chosenSet.Count -eq 0) { continue }
-        $isApache = $false
-        if ($type -match '^(?i)(2|a|apache)$') { $isApache = $true }
+        Write-Host ""
+        
+        $addAll = Read-YesNo -Message "Add all leaf directories? (y/N)" -Default 'N'
+        
+        if ($addAll) {
+            # Show all directories (not just leaf) in fzf for selective addition
+            Write-Host ""
+            Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
+            Write-Host ""
+            $displayLines = foreach ($dir in $sortedDirs) { "$( $dir )`t$( $decodedMap[$dir] )" }
+            $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Select Dirs: ' -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
+            if (!$selected -or $LASTEXITCODE -ne 0) { continue }
+            $lines = $selected -split "`n" | Where-Object { $_ }
+            $chosenSet = [System.Collections.ArrayList]::new()
+            foreach ($line in $lines) { 
+                $parts = $line -split "`t", 2
+                if ($parts.Count -ge 1) { $null = $chosenSet.Add((Add-TrailingSlash $parts[0])) } 
+            }
+            if ($chosenSet.Count -eq 0) { continue }
+        }
+        else {
+            # Show all directories (not just leaf) in fzf for selective addition
+            Write-Host ""
+            Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow
+            Write-Host ""
+            $displayLines = foreach ($dir in $sortedDirs) { "$( $dir )`t$( $decodedMap[$dir] )" }
+            $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Select: ' -WithNth '1' -Multi $true -Height 20 -Delimiter "`t"
+            if (!$selected -or $LASTEXITCODE -ne 0) { continue }
+            $lines = $selected -split "`n" | Where-Object { $_ }
+            $chosenSet = [System.Collections.ArrayList]::new()
+            foreach ($line in $lines) { 
+                $parts = $line -split "`t", 2
+                if ($parts.Count -ge 1) { $null = $chosenSet.Add((Add-TrailingSlash $parts[0])) } 
+            }
+            if ($chosenSet.Count -eq 0) { continue }
+        }
+        Initialize-SourceUrls
         $targetList = if ($isApache) { $ApacheSites } else { $H5aiSites }
         $existingSet = @{}
         foreach ($t in $targetList) { $existingSet[$t.url] = $true }
@@ -153,6 +216,7 @@ function Add-Source {
         $url = Add-TrailingSlash $url
         
         # Build hashtable for faster lookup
+        Initialize-SourceUrls
         $existingUrls = @{}
         foreach ($s in $H5aiSites) { $existingUrls[$s.url] = $true }
         foreach ($s in $ApacheSites) { $existingUrls[$s.url] = $true }
@@ -192,6 +256,7 @@ function Remove-SelectableItems {
 
 function Remove-Source {
     Remove-SelectableItems -Title 'Remove Sources' -Prompt 'Sources:' -GetItemsScript {
+        Initialize-SourceUrls
         $out = [System.Collections.ArrayList]::new()
         foreach ($s in $H5aiSites) { $null = $out.Add("$( $s.url )`th5ai") }
         foreach ($s in $ApacheSites) { $null = $out.Add("$( $s.url )`tapache") }
@@ -291,6 +356,7 @@ function Remove-InaccessibleSources {
     }
     Set-CrawlMeta -Meta $crawlNew
     Write-Host "Updating source list..." -ForegroundColor Cyan
+    Initialize-SourceUrls
     $script:H5aiSites = @($H5aiSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     $script:ApacheSites = @($ApacheSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites

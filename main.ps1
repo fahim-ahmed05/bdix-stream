@@ -45,7 +45,7 @@ if (!(Test-Path $SettingsPath)) {
         DirBlockList    = $script:Config.DirBlockList
         Tools           = $script:Config.Tools
     }
-    $OrderedConfig | ConvertTo-Json -Depth 5 -Compress | Set-Content $SettingsPath -Encoding UTF8
+    $OrderedConfig | ConvertTo-Json -Depth 5 | Set-Content $SettingsPath -Encoding UTF8
     Write-Host "Created default config: $SettingsPath" -ForegroundColor Green
 }
 
@@ -54,20 +54,6 @@ $script:fzfPath = $_toolPaths.fzf
 $script:aria2cPath = $_toolPaths.aria2c
 $script:jqPath = $_toolPaths.jq
 $script:editPath = $_toolPaths.edit
-
-
-$UrlData = Read-JsonFile -Path $SourceUrlsPath
-if ($UrlData) {
-    $H5aiSites = ConvertTo-SiteList -List $UrlData.H5aiSites
-    $ApacheSites = ConvertTo-SiteList -List $UrlData.ApacheSites
-    Set-Urls -H5ai $H5aiSites -Apache $ApacheSites
-}
-else {
-    $H5aiSites = @()
-    $ApacheSites = @()
-    Set-Urls -H5ai $H5aiSites -Apache $ApacheSites
-    Write-Host "Initialized empty URL list: $SourceUrlsPath" -ForegroundColor Green
-}
 
 $global:DirBlockSet = Get-DirBlockSet
 
@@ -79,6 +65,9 @@ function Invoke-IndexOperation {
         [ValidateSet('build', 'update', 'selective')]
         [string]$Mode
     )
+    
+    # Load source URLs only when needed for indexing operations
+    Initialize-SourceUrls
     
     # Set header based on mode
     $headerText = switch ($Mode) {
@@ -473,6 +462,7 @@ function Remove-InvalidIndexEntries {
 
     $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
+    Initialize-SourceUrls
     $allDirsToCrawl = @{}
     $rootDirs = Get-AllRootUrls
     foreach ($root in $rootDirs) {

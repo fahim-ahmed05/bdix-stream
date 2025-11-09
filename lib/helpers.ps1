@@ -25,7 +25,23 @@ $BlockedDirsLogPath = Join-Path $DataDir 'blocked-dirs.log'
 
 if (!(Test-Path $DataDir)) { New-Item -ItemType Directory -Path $DataDir | Out-Null }
 
+# Lazy-load source URLs only when needed
+function Initialize-SourceUrls {
+    if ($null -eq $script:H5aiSites -or $null -eq $script:ApacheSites) {
+        $UrlData = Read-JsonFile -Path $SourceUrlsPath
+        if ($UrlData) {
+            $script:H5aiSites = ConvertTo-SiteList -List $UrlData.H5aiSites
+            $script:ApacheSites = ConvertTo-SiteList -List $UrlData.ApacheSites
+        }
+        else {
+            $script:H5aiSites = @()
+            $script:ApacheSites = @()
+        }
+    }
+}
+
 function Get-AllRootUrls {
+    Initialize-SourceUrls
     $seen = @{}
     $dedup = [System.Collections.ArrayList]::new()
     
@@ -251,11 +267,16 @@ function Set-Urls {
     if (-not $Apache) { $Apache = @() }
     $H5ai = @($H5ai)
     $Apache = @($Apache)
+    
+    # Update in-memory variables
+    $script:H5aiSites = $H5ai
+    $script:ApacheSites = $Apache
+    
     $payload = [ordered]@{
         ApacheSites = $Apache
         H5aiSites   = $H5ai
     }
-    $payload | ConvertTo-Json -Depth 6 -Compress | Set-Content $SourceUrlsPath -Encoding UTF8
+    $payload | ConvertTo-Json -Depth 6 | Set-Content $SourceUrlsPath -Encoding UTF8
 }
 
 function Get-MergedConfig($Default, $Override) {
@@ -387,6 +408,7 @@ function Add-SiteUrl {
         [Parameter(Mandatory = $true)]
         [bool]$IsApache
     )
+    Initialize-SourceUrls
     if ($IsApache) {
         $tempList = [System.Collections.ArrayList]::new()
         if ($script:ApacheSites) { foreach ($s in $script:ApacheSites) { $null = $tempList.Add($s) } }
@@ -451,6 +473,7 @@ function Get-AllSourcesList {
         [switch]$NormalizeUrls
     )
     
+    Initialize-SourceUrls
     $allSources = [System.Collections.ArrayList]::new()
     
     foreach ($s in $H5aiSites) {
