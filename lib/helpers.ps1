@@ -190,6 +190,17 @@ function Get-CurrentFiles {
     return @($files)
 }
 
+function Get-LogFiles {
+    $files = [System.Collections.ArrayList]::new()
+    $logPaths = @($MissingTimestampsLogPath, $BlockedDirsLogPath)
+    foreach ($path in $logPaths) {
+        if (Test-Path $path) {
+            $null = $files.Add($path)
+        }
+    }
+    return @($files)
+}
+
 function Backup-Files {
     param([string[]]$Paths)
     if (-not (Test-Path $BackupRoot)) { New-Item -ItemType Directory -Path $BackupRoot | Out-Null }

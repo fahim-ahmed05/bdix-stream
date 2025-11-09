@@ -634,6 +634,12 @@ while ($true) {
                         '3' = @{ Label = 'Restore Files'; Action = { Restore-BackupFiles } }
                     }
                 }}
+                '3' = @{ Label = 'Log Files'; Action = {
+                    Show-Menu -Title "Log Files" -HasBack -HasQuit -Options @{
+                        '1' = @{ Label = 'View Files'; Action = { Show-LogFiles } }
+                        '2' = @{ Label = 'Remove Files'; Action = { Remove-LogFiles } }
+                    }
+                }}
             }
         }
         default { Write-Host "Invalid option. Try again." }

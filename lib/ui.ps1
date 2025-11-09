@@ -451,15 +451,17 @@ function Invoke-FileOperation {
         [string]$Mode,
         
         [Parameter(Mandatory)]
-        [ValidateSet('current', 'backup')]
+        [ValidateSet('current', 'backup', 'log')]
         [string]$FileSource
     )
     
     $titleMap = @{
         'view-current' = 'View Current Files'
         'view-backup' = 'View Backup Files'
+        'view-log' = 'View Log Files'
         'remove-current' = 'Remove Current Files'
         'remove-backup' = 'Remove Backup Files'
+        'remove-log' = 'Remove Log Files'
         'restore-backup' = 'Restore Backup Files'
         'backup-current' = 'Backup Current Files'
     }
@@ -467,8 +469,10 @@ function Invoke-FileOperation {
     $promptMap = @{
         'view-current' = 'File: '
         'view-backup' = 'Backup: '
+        'view-log' = 'Log: '
         'remove-current' = 'Files:'
         'remove-backup' = 'Backups:'
+        'remove-log' = 'Logs:'
         'restore-backup' = 'Restore: '
         'backup-current' = 'Backup: '
     }
@@ -481,9 +485,13 @@ function Invoke-FileOperation {
         # View mode - loop for continuous viewing
         while ($true) {
             Show-Header $title
-            $files = if ($FileSource -eq 'backup') { Get-BackupFiles } else { Get-CurrentFiles }
+            $files = if ($FileSource -eq 'backup') { Get-BackupFiles } 
+                     elseif ($FileSource -eq 'log') { Get-LogFiles }
+                     else { Get-CurrentFiles }
             if ($files.Count -eq 0) {
-                $msg = if ($FileSource -eq 'backup') { "No backup files found." } else { "No current files found." }
+                $msg = if ($FileSource -eq 'backup') { "No backup files found." } 
+                       elseif ($FileSource -eq 'log') { "No log files found." }
+                       else { "No current files found." }
                 Write-Host $msg -ForegroundColor Yellow
                 Wait-Return "Press Enter to return..."
                 return
@@ -671,6 +679,14 @@ function Remove-CurrentFiles {
 
 function Backup-CurrentFiles {
     Invoke-CurrentFileOperation -Mode 'backup'
+}
+
+function Show-LogFiles {
+    Invoke-FileOperation -Mode 'view' -FileSource 'log'
+}
+
+function Remove-LogFiles {
+    Invoke-FileOperation -Mode 'remove' -FileSource 'log'
 }
 
 function Invoke-ResumeLastPlayed {
