@@ -77,13 +77,53 @@ function Invoke-IndexOperation {
     }
     Show-Header $headerText
     
+    # Check for existing progress and offer to resume
+    $existingProgress = Get-IndexProgress
+    $resuming = $false
+    $startIndex = 0
+    
+    if ($existingProgress -and (Test-IndexProgressValid -Progress $existingProgress -CurrentMode $Mode)) {
+        $progressAge = ((Get-Date) - [DateTime]::Parse($existingProgress.timestamp)).TotalMinutes
+        Write-Host "Found interrupted indexing session:" -ForegroundColor Yellow
+        Write-Host "  Mode: $($existingProgress.mode)" -ForegroundColor Yellow
+        Write-Host "  Started: $($existingProgress.timestamp) ($([Math]::Round($progressAge, 1)) minutes ago)" -ForegroundColor Yellow
+        Write-Host "  Progress: $($existingProgress.currentSourceIndex) / $($existingProgress.totalSources) sources completed" -ForegroundColor Yellow
+        Write-Host ""
+        
+        $resume = Read-YesNo -Message "Resume from where you left off? (Y/n)" -Default 'Y'
+        
+        if ($resume) {
+            $resuming = $true
+            $startIndex = $existingProgress.currentSourceIndex
+            Write-Host "Resuming indexing from source $($startIndex + 1)..." -ForegroundColor Green
+            Write-Host ""
+        }
+        else {
+            Remove-IndexProgress
+            Write-Host "Starting fresh indexing session..." -ForegroundColor Cyan
+            Write-Host ""
+        }
+    }
+    elseif ($existingProgress -and $existingProgress.mode -ne $Mode) {
+        Write-Host "Found incomplete $($existingProgress.mode) session. Starting new $Mode session..." -ForegroundColor Yellow
+        Remove-IndexProgress
+        Write-Host ""
+    }
+    
     # Mode-specific source selection
     $sourcesToProcess = @()
     $isIncremental = $false
     $forceSet = @{}
     $onlyNew = $false
     
-    if ($Mode -eq 'selective') {
+    if ($resuming) {
+        # Restore configuration from saved progress
+        $sourcesToProcess = $existingProgress.sourcesToProcess
+        $isIncremental = $existingProgress.config.isIncremental
+        $onlyNew = $existingProgress.config.onlyNew
+        $forceSet = $existingProgress.config.forceSet
+    }
+    elseif ($Mode -eq 'selective') {
         # Let user select sources
         $allSources = Get-AllSourcesList -IncludeIndexed
         if ($allSources.Count -eq 0) {
@@ -276,18 +316,30 @@ function Invoke-IndexOperation {
     Write-Host ""
     Write-Host "Building index..." -ForegroundColor Cyan
     
-    $siteNum = 0
+    $siteNum = $startIndex
     $totalSites = $sourcesToProcess.Count
     
     if ($Mode -eq 'update') {
         $script:NoLongerEmptyCount = 0
     }
     
-    foreach ($src in $sourcesToProcess) {
+    # Save initial progress if starting fresh
+    if (-not $resuming) {
+        Save-IndexProgress -Mode $Mode -SourcesList $sourcesToProcess -CurrentIndex 0 -IsIncremental $isIncremental -OnlyNew $onlyNew -ForceSet $forceSet
+    }
+    
+    for ($i = $startIndex; $i -lt $sourcesToProcess.Count; $i++) {
+        $src = $sourcesToProcess[$i]
         $siteNum++
         $isApache = ($src.type -eq 'apache')
         $actionText = if ($Mode -eq 'update') { "Updating" } else { "Indexing" }
-        Write-Host "[$siteNum/$totalSites] $actionText`: $($src.url)" -ForegroundColor Cyan
+        
+        if ($resuming -and $i -eq $startIndex) {
+            Write-Host "[$siteNum/$totalSites] Resuming -> $($src.url)" -ForegroundColor Green
+        }
+        else {
+            Write-Host "[$siteNum/$totalSites] $actionText`: $($src.url)" -ForegroundColor Cyan
+        }
         
         # For selective mode with full reindex, clear existing entries for this source
         $localForceSet = $forceSet.Clone()
@@ -316,6 +368,15 @@ function Invoke-IndexOperation {
         else {
             Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
         }
+        
+        # Save index and crawler state after each source (for resume capability)
+        Write-Host "  Saving progress..." -ForegroundColor DarkGray
+        $Index.Values | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
+        Set-CrawlMeta -Meta $CrawlMeta
+        
+        # Save progress tracking after completing this source
+        Save-IndexProgress -Mode $Mode -SourcesList $sourcesToProcess -CurrentIndex ($i + 1) -IsIncremental $isIncremental -OnlyNew $onlyNew -ForceSet $forceSet
+        $resuming = $false
     }
     
     Write-Host ""
@@ -435,6 +496,10 @@ function Invoke-IndexOperation {
         Write-Host "  Blocked directories skipped: $script:SkippedBlockedDirs" -ForegroundColor Green
     }
     Write-Host "  Elapsed time: $elapsed" -ForegroundColor Green
+    
+    # Remove progress file on successful completion
+    Remove-IndexProgress
+    
     Wait-Return "Press Enter to return..."
 }
 

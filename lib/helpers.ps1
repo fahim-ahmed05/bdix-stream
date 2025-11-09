@@ -19,6 +19,7 @@ $SourceUrlsPath = Join-Path $DataDir 'source-urls.json'
 $MediaIndexPath = Join-Path $DataDir 'media-index.json'
 $WatchHistoryPath = Join-Path $DataDir 'watch-history.json'
 $CrawlerStatePath = Join-Path $DataDir 'crawler-state.json'
+$IndexProgressPath = Join-Path $DataDir 'index-progress.json'
 $MissingTimestampsLogPath = Join-Path $DataDir 'timestamp-missing.log'
 $BackupRoot = Join-Path $DataDir 'backups'
 $BlockedDirsLogPath = Join-Path $DataDir 'blocked-dirs.log'
@@ -574,4 +575,77 @@ function Invoke-Fzf {
     if ($LASTEXITCODE -ne 0) { return $null }
     
     return $selected
+}
+
+# ===== Index Progress Management =====
+
+function Save-IndexProgress {
+    param(
+        [string]$Mode,
+        [array]$SourcesList,
+        [int]$CurrentIndex,
+        [bool]$IsIncremental,
+        [bool]$OnlyNew,
+        [hashtable]$ForceSet
+    )
+    
+    $progress = @{
+        mode = $Mode
+        timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        currentSourceIndex = $CurrentIndex
+        totalSources = $SourcesList.Count
+        sourcesToProcess = $SourcesList
+        config = @{
+            isIncremental = $IsIncremental
+            onlyNew = $OnlyNew
+            forceSet = $ForceSet
+        }
+    }
+    
+    $progress | ConvertTo-Json -Depth 10 | Set-Content $IndexProgressPath -Encoding UTF8
+}
+
+function Get-IndexProgress {
+    if (-not (Test-Path $IndexProgressPath)) { return $null }
+    
+    try {
+        $progress = Read-JsonFile -Path $IndexProgressPath -AsHashtable
+        return $progress
+    }
+    catch {
+        Write-Host "Warning: Failed to read progress file. It may be corrupted." -ForegroundColor Yellow
+        return $null
+    }
+}
+
+function Remove-IndexProgress {
+    if (Test-Path $IndexProgressPath) {
+        Remove-Item -Path $IndexProgressPath -Force
+    }
+}
+
+function Test-IndexProgressValid {
+    param([hashtable]$Progress, [string]$CurrentMode)
+    
+    if (-not $Progress) { return $false }
+    
+    # Check if progress has all required fields
+    if (-not $Progress.ContainsKey('mode') -or 
+        -not $Progress.ContainsKey('currentSourceIndex') -or 
+        -not $Progress.ContainsKey('sourcesToProcess') -or
+        -not $Progress.ContainsKey('config')) {
+        return $false
+    }
+    
+    # Check if mode matches
+    if ($Progress.mode -ne $CurrentMode) {
+        return $false
+    }
+    
+    # Check if we haven't completed all sources
+    if ($Progress.currentSourceIndex -ge $Progress.sourcesToProcess.Count) {
+        return $false
+    }
+    
+    return $true
 }
