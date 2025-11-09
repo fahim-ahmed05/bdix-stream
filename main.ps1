@@ -333,6 +333,10 @@ function Invoke-IndexOperation {
         $script:NoLongerEmptyCount = 0
     }
     
+    # Track if anything changed across all sources
+    $initialNewDirs = $script:NewDirs
+    $initialNewFiles = $script:NewFiles
+    
     # Save initial progress if starting fresh
     if (-not $resuming) {
         Save-IndexProgress -Mode $Mode -SourcesList $sourcesToProcess -CurrentIndex 0 -IsIncremental $isIncremental -OnlyNew $onlyNew -ForceSet $forceSet
@@ -372,6 +376,9 @@ function Invoke-IndexOperation {
         
         Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true
         
+        # Check if anything changed for this source
+        $sourceHadChanges = ($script:NewDirs -gt $initialNewDirs) -or ($script:NewFiles -gt $initialNewFiles)
+        
         if ($Mode -eq 'update') {
             Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
         }
@@ -379,12 +386,21 @@ function Invoke-IndexOperation {
             Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
         }
         
-        # Save crawler state after each source (for resume capability)
-        Write-Host "  Saving progress..." -ForegroundColor DarkGray
-        Set-CrawlMeta -Meta $CrawlMeta
+        # Save crawler state after each source only if something changed (for resume capability)
+        if ($sourceHadChanges) {
+            Write-Host "  Saving progress..." -ForegroundColor DarkGray
+            Set-CrawlMeta -Meta $CrawlMeta
+        }
+        else {
+            Write-Host "  No changes, skipping save..." -ForegroundColor DarkGray
+        }
         
         # Save progress tracking after completing this source
         Save-IndexProgress -Mode $Mode -SourcesList $sourcesToProcess -CurrentIndex ($i + 1) -IsIncremental $isIncremental -OnlyNew $onlyNew -ForceSet $forceSet
+        
+        # Update baseline for next source
+        $initialNewDirs = $script:NewDirs
+        $initialNewFiles = $script:NewFiles
         $resuming = $false
     }
     
