@@ -613,7 +613,9 @@ function Invoke-FileOperation {
     elseif ($Mode -eq 'remove') {
         # Remove mode
         Remove-SelectableItems -Title $title -Prompt $prompt -GetItemsScript {
-            $files = if ($FileSource -eq 'backup') { Get-BackupFiles } else { Get-CurrentFiles }
+            $files = if ($FileSource -eq 'backup') { Get-BackupFiles } 
+                     elseif ($FileSource -eq 'log') { Get-LogFiles }
+                     else { Get-CurrentFiles }
             foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
         } -RemoveScript {
             param($selectedLines)
