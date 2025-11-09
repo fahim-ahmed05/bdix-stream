@@ -396,19 +396,6 @@ function Invoke-IndexOperation {
     
     Write-Host ""
     
-    # Merge with existing index for build mode with onlyNew
-    if ($Mode -eq 'build' -and $onlyNew -and (Test-Path $MediaIndexPath)) {
-        Write-Host "Merging with existing index..." -ForegroundColor Cyan
-        $existingIndex = Read-JsonFile -Path $MediaIndexPath
-        if ($existingIndex) {
-            foreach ($e in $existingIndex) { 
-                if (-not $Index.ContainsKey($e.Url)) { 
-                    $Index[$e.Url] = $e 
-                }
-            }
-        }
-    }
-    
     # Save results
     Write-Host "Saving index..." -ForegroundColor Cyan
     $Index.Values | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
