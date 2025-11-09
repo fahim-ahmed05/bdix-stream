@@ -489,7 +489,7 @@ function Invoke-BackupIndexStream {
         return
     }
     
-    $jqQuery = '.[] | "\(.Name // "-" )\t\(.Url)"'
+    $jqQuery = '.files | to_entries | .[] | "\(.value)\t\(.key)"'
     $rawLines = Get-Content $BackupFilePath -Raw | & $script:jqPath -r $jqQuery
     if (!$rawLines) { 
         Write-Host "Backup index is empty." -ForegroundColor Red
@@ -510,8 +510,7 @@ function Invoke-BackupIndexStream {
         
         $parts = $selected -split "`t", 2
         if ($parts.Count -lt 2) { continue }
-        $url = $parts[1]
-        $name = if ($parts[0] -ne "-") { $parts[0] } else { [System.IO.Path]::GetFileName($url) }
+        $url = $parts[1]; $name = $parts[0]
         
         Write-Host "Streaming: $name" -ForegroundColor Green
         Add-HistoryEntry -Name $name -Url $url
@@ -581,7 +580,7 @@ function Invoke-FileOperation {
             }
             
             if ($FileSource -eq 'backup') {
-                Write-Host "Tip: Select media-index backup to stream, other files to edit. ESC to return." -ForegroundColor Yellow
+                Write-Host "Tip: Select crawler-state backup to stream, other files to edit. ESC to return." -ForegroundColor Yellow
             } else {
                 Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
             }
@@ -595,15 +594,15 @@ function Invoke-FileOperation {
             $path = $parts[1]
             $filename = Split-Path $path -Leaf
             
-            # Check if this is a media-index backup file (only for backups, not current)
-            if ($FileSource -eq 'backup' -and $filename -match '^media-index\d{8}_\d{6}\.json$') {
+            # Check if this is a crawler-state backup file (only for backups, not current)
+            if ($FileSource -eq 'backup' -and $filename -match '^crawler-state\d{8}_\d{6}\.json$') {
                 # Stream from backup index
                 Invoke-BackupIndexStream -BackupFilePath $path
                 # After streaming, return to backup file list
                 continue
             }
             
-            # For other files (or current media-index), open in editor
+            # For other files (or current crawler-state), open in editor
             if (Test-Path $path) { & $script:editPath $path }
             else {
                 Write-Host "File not found: $path" -ForegroundColor Red
