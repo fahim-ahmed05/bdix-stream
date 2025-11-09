@@ -4,7 +4,6 @@ function Invoke-IndexCrawl {
         [int]$Depth,
         [bool]$IsApache,
         [hashtable]$Visited,
-        [hashtable]$IndexRef,
         [hashtable]$CrawlMetaRef,
         [hashtable]$ForceReindexSet,
         [bool]$TrackStats = $false
@@ -74,8 +73,7 @@ function Invoke-IndexCrawl {
         # Index all video files in this directory
         foreach ($v in $videos) {
             if (-not $CrawlMetaRef.files.ContainsKey($v.Url)) {
-                $CrawlMetaRef.files[$v.Url] = $true
-                $IndexRef[$v.Url] = [PSCustomObject]@{ Name = $v.Name; Url = $v.Url }
+                $CrawlMetaRef.files[$v.Url] = $v.Name
                 if ($TrackStats) { $script:NewFiles++ }
             }
         }
@@ -85,7 +83,7 @@ function Invoke-IndexCrawl {
             $dirUrl = Add-TrailingSlash $dir.Url
             if (Test-IsBlockedUrl -Url $dirUrl -BlockSet $global:DirBlockSet) { if ($TrackStats) { $script:SkippedBlockedDirs++ ; $script:BlockedDirUrls += $dirUrl } ; continue }
             if (-not $dir.LastModified) { $script:MissingDateDirs += $dirUrl }
-            Invoke-IndexCrawl -Url $dirUrl -Depth ($Depth - 1) -IsApache $IsApache -Visited $Visited -IndexRef $IndexRef -CrawlMetaRef $CrawlMetaRef -ForceReindexSet $ForceReindexSet -TrackStats $TrackStats
+            Invoke-IndexCrawl -Url $dirUrl -Depth ($Depth - 1) -IsApache $IsApache -Visited $Visited -CrawlMetaRef $CrawlMetaRef -ForceReindexSet $ForceReindexSet -TrackStats $TrackStats
         }
     }
     elseif ($TrackStats) { $script:IgnoredDirsSameTimestamp++ }

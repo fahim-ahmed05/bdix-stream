@@ -297,7 +297,6 @@ function Invoke-IndexOperation {
     # Handle backup for build mode (BEFORE any processing)
     if ($Mode -eq 'build' -and -not $onlyNew -and -not $resuming) {
         $backupPaths = [System.Collections.ArrayList]::new()
-        if (Test-Path $MediaIndexPath) { $null = $backupPaths.Add($MediaIndexPath) }
         if (Test-Path $CrawlerStatePath) { $null = $backupPaths.Add($CrawlerStatePath) }
         
         if ($backupPaths.Count -gt 0) {
@@ -309,17 +308,15 @@ function Invoke-IndexOperation {
         }
     }
     
-    # Load or create index and crawler state
+    # Load or create crawler state
     $loadExisting = ($Mode -eq 'update') -or ($isIncremental) -or ($onlyNew)
     if ($loadExisting) {
         if ($Mode -ne 'build') {
-            Write-Host "Loading existing index and crawler state..." -ForegroundColor Cyan
+            Write-Host "Loading existing crawler state..." -ForegroundColor Cyan
         }
-        $Index = Get-ExistingIndexMap
         $CrawlMeta = Get-CrawlMeta
     }
     else {
-        $Index = @{}
         $CrawlMeta = @{ dirs = @{}; files = @{} }
     }
     
@@ -359,12 +356,6 @@ function Invoke-IndexOperation {
             $localForceSet[$srcRoot] = $true
             
             $keysToRemove = [System.Collections.ArrayList]::new()
-            foreach ($k in $Index.Keys) {
-                if ($k.StartsWith($srcRoot)) { $null = $keysToRemove.Add($k) }
-            }
-            foreach ($k in $keysToRemove) { $Index.Remove($k) }
-            
-            $keysToRemove = [System.Collections.ArrayList]::new()
             foreach ($k in $CrawlMeta.dirs.Keys) {
                 if ($k.StartsWith($srcRoot)) { $null = $keysToRemove.Add($k) }
             }
@@ -377,7 +368,7 @@ function Invoke-IndexOperation {
             foreach ($k in $keysToRemove) { $CrawlMeta.files.Remove($k) }
         }
         
-        Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true
+        Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true
         
         if ($Mode -eq 'update') {
             Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
@@ -386,9 +377,8 @@ function Invoke-IndexOperation {
             Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
         }
         
-        # Save index and crawler state after each source (for resume capability)
+        # Save crawler state after each source (for resume capability)
         Write-Host "  Saving progress..." -ForegroundColor DarkGray
-        $Index.Values | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
         Set-CrawlMeta -Meta $CrawlMeta
         
         # Save progress tracking after completing this source
@@ -461,7 +451,7 @@ function Invoke-IndexOperation {
         }
     }
     Write-Host $completionMsg -ForegroundColor Green
-    Write-Host "  Total indexed files: $($Index.Count)" -ForegroundColor Green
+    Write-Host "  Total indexed files: $($CrawlMeta.files.Count)" -ForegroundColor Green
     Write-Host "  New directories: $script:NewDirs" -ForegroundColor Green
     Write-Host "  New files: $script:NewFiles" -ForegroundColor Green
     
@@ -506,7 +496,6 @@ function Remove-InvalidIndexEntries {
     }
 
     $CrawlMeta = Get-CrawlMeta
-    $Index = Get-ExistingIndexMap
 
     $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 
@@ -572,7 +561,6 @@ function Remove-InvalidIndexEntries {
     Write-Host "Analyzing crawler state for dead links..." -ForegroundColor Cyan
     $deadCount = 0
     $newCrawlMeta = @{ dirs = @{}; files = @{} }
-    $newIndex = @{}
     $deadUrls = [System.Collections.ArrayList]::new()
 
     foreach ($url in $CrawlMeta.dirs.Keys) {
@@ -587,10 +575,7 @@ function Remove-InvalidIndexEntries {
     
     foreach ($url in $CrawlMeta.files.Keys) {
         if ($liveUrls.ContainsKey($url)) {
-            $newCrawlMeta.files[$url] = $true
-            if ($Index.ContainsKey($url)) {
-                $newIndex[$url] = $Index[$url]
-            }
+            $newCrawlMeta.files[$url] = $CrawlMeta.files[$url]
         }
         else {
             $deadCount++
@@ -599,8 +584,6 @@ function Remove-InvalidIndexEntries {
     }
 
     if ($deadCount -gt 0) {
-        Write-Host "Saving updated index..." -ForegroundColor Cyan
-        $newIndex.Values | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
         Write-Host "Saving updated crawler state..." -ForegroundColor Cyan
         Set-CrawlMeta -Meta $newCrawlMeta
 

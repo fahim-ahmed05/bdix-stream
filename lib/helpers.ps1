@@ -68,17 +68,6 @@ function Get-AllRootUrls {
     return @($dedup)
 }
 
-function Get-ExistingIndexMap {
-    $map = @{}
-    $existing = Read-JsonFile -Path $MediaIndexPath
-    if ($existing) {
-        foreach ($item in $existing) { 
-            if ($item.Url) { $map[$item.Url] = $item } 
-        }
-    }
-    return $map
-}
-
 function Read-YesNo {
     param(
         [string]$Message,
@@ -196,7 +185,7 @@ function Get-BackupFiles {
 
 function Get-CurrentFiles {
     $files = [System.Collections.ArrayList]::new()
-    $filePaths = @($SettingsPath, $SourceUrlsPath, $MediaIndexPath, $WatchHistoryPath, $CrawlerStatePath)
+    $filePaths = @($SettingsPath, $SourceUrlsPath, $WatchHistoryPath, $CrawlerStatePath)
     foreach ($path in $filePaths) {
         if (Test-Path $path) {
             $null = $files.Add($path)

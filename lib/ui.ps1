@@ -319,58 +319,49 @@ function Remove-InaccessibleSources {
     $rootSet = @{}
     foreach ($r in $roots) { $rootSet[(Add-TrailingSlash $r)] = $true }
     
-    $indexCount = 0; $indexRemove = 0
-    $idx = Read-JsonFile -Path $MediaIndexPath
-    if ($idx) { 
-        $indexCount = $idx.Count
-        foreach ($e in $idx) {
-            foreach ($r in $rootSet.Keys) {
-                if ($e.Url.StartsWith($r)) { $indexRemove++; break }
-            }
+    $crawl = Get-CrawlMeta
+    $fileCount = $crawl.files.Count
+    $dirCount = $crawl.dirs.Count
+    $fileRemove = 0; $dirRemove = 0
+    foreach ($k in $crawl.files.Keys) {
+        foreach ($r in $rootSet.Keys) {
+            if ($k.StartsWith($r)) { $fileRemove++; break }
         }
     }
-    $crawl = Get-CrawlMeta
-    $crawlCount = $crawl.Keys.Count
-    $crawlRemove = 0
-    foreach ($k in $crawl.Keys) {
+    foreach ($k in $crawl.dirs.Keys) {
         foreach ($r in $rootSet.Keys) {
-            if ($k.StartsWith($r)) { $crawlRemove++; break }
+            if ($k.StartsWith($r)) { $dirRemove++; break }
         }
     }
     $srcCount = $allSources.Count
     $srcRemove = $inaccessible.Count
     Write-Host "Unreachable sources: $srcRemove / $srcCount" -ForegroundColor Yellow
-    Write-Host "Media index entries to remove: $indexRemove / $indexCount" -ForegroundColor Yellow
-    Write-Host "Crawler entries to remove: $crawlRemove / $crawlCount" -ForegroundColor Yellow
-    $remainingIdx = if ($indexCount -ge $indexRemove) { $indexCount - $indexRemove } else { 0 }
-    $remainingCrawl = if ($crawlCount -ge $crawlRemove) { $crawlCount - $crawlRemove } else { 0 }
+    Write-Host "Media files to remove: $fileRemove / $fileCount" -ForegroundColor Yellow
+    Write-Host "Directories to remove: $dirRemove / $dirCount" -ForegroundColor Yellow
+    $remainingFiles = if ($fileCount -ge $fileRemove) { $fileCount - $fileRemove } else { 0 }
+    $remainingDirs = if ($dirCount -ge $dirRemove) { $dirCount - $dirRemove } else { 0 }
     $remainingSrc = $srcCount - $srcRemove
-    Write-Host "After purge -> Sources: $remainingSrc | Index: $remainingIdx | Crawler: $remainingCrawl" -ForegroundColor Cyan
+    Write-Host "After purge -> Sources: $remainingSrc | Files: $remainingFiles | Dirs: $remainingDirs" -ForegroundColor Cyan
     $confirm = Read-YesNo -Message "Proceed with purge? (y/N)" -Default 'N'
     if (-not $confirm) { Write-Host "Aborted." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
-    $backupFiles = Backup-Files -Paths @($SourceUrlsPath, $MediaIndexPath, $CrawlerStatePath)
+    $backupFiles = Backup-Files -Paths @($SourceUrlsPath, $CrawlerStatePath)
     if ($backupFiles.Count -gt 0) { Write-Host "Backed up: $($backupFiles -join ', ')" -ForegroundColor Green }
     
-    Write-Host "Processing index..." -ForegroundColor Cyan
-    $idx = Read-JsonFile -Path $MediaIndexPath
-    if ($idx) { 
-        $idx = @($idx | Where-Object { 
-            $keep = $true
-            foreach ($r in $rootSet.Keys) {
-                if ($_.Url.StartsWith($r)) { $keep = $false; break }
-            }
-            $keep
-        })
-    }
-    $idx | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
     Write-Host "Processing crawler state..." -ForegroundColor Cyan
-    $crawlNew = @{}
-    foreach ($k in $crawl.Keys) {
+    $crawlNew = @{ dirs = @{}; files = @{} }
+    foreach ($k in $crawl.dirs.Keys) {
         $keep = $true
         foreach ($r in $rootSet.Keys) {
             if ($k.StartsWith($r)) { $keep = $false; break }
         }
-        if ($keep) { $crawlNew[$k] = $crawl[$k] }
+        if ($keep) { $crawlNew.dirs[$k] = $crawl.dirs[$k] }
+    }
+    foreach ($k in $crawl.files.Keys) {
+        $keep = $true
+        foreach ($r in $rootSet.Keys) {
+            if ($k.StartsWith($r)) { $keep = $false; break }
+        }
+        if ($keep) { $crawlNew.files[$k] = $crawl.files[$k] }
     }
     Set-CrawlMeta -Meta $crawlNew
     Write-Host "Updating source list..." -ForegroundColor Cyan
@@ -378,13 +369,12 @@ function Remove-InaccessibleSources {
     $script:H5aiSites = @($H5aiSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     $script:ApacheSites = @($ApacheSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites
-    $idxLeft = 0
-    $tmp = Read-JsonFile -Path $MediaIndexPath
-    if ($tmp) { $idxLeft = $tmp.Count }
-    $crawlLeft = (Get-CrawlMeta).Keys.Count
+    $crawlLeft = (Get-CrawlMeta)
+    $filesLeft = $crawlLeft.files.Count
+    $dirsLeft = $crawlLeft.dirs.Count
     $srcLeft = ($script:H5aiSites.Count + $script:ApacheSites.Count)
     Write-Host "Purge complete." -ForegroundColor Green
-    Write-Host "Remaining -> Sources: $srcLeft | Index: $idxLeft | Crawler: $crawlLeft" -ForegroundColor Green
+    Write-Host "Remaining -> Sources: $srcLeft | Files: $filesLeft | Dirs: $dirsLeft" -ForegroundColor Green
     Wait-Return "Press Enter to return..."
 }
 
@@ -430,9 +420,9 @@ function Invoke-SearchInteraction {
     Show-Header $(if ($Mode -eq 'Stream') { 'Network Stream' } else { 'Download Media' })
     if ($Mode -eq "Download") { Write-Host "Tip: press TAB to select/deselect and ESC to return." -ForegroundColor Yellow; Write-Host "" }
     if ($Mode -eq "Stream") { Write-Host "Tip: press ESC to return." -ForegroundColor Yellow; Write-Host "" }
-    if (!(Test-Path $MediaIndexPath)) { Write-Host "Index file not found: $MediaIndexPath. Build the index first." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
-    $jqQuery = '.[] | "\(.Name // "-" )\t\(.Url)"'
-    $rawLines = Get-Content $MediaIndexPath -Raw | & $script:jqPath -r $jqQuery
+    if (!(Test-Path $CrawlerStatePath)) { Write-Host "Crawler state not found: $CrawlerStatePath. Build the index first." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
+    $jqQuery = '.files | to_entries | .[] | "\(.value)\t\(.key)"'
+    $rawLines = Get-Content $CrawlerStatePath -Raw | & $script:jqPath -r $jqQuery
     if (!$rawLines) { Write-Host "Index is empty." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
     
     $fzfQuery = ''
