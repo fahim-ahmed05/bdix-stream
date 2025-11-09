@@ -58,6 +58,7 @@ function Invoke-LinkExplorer {
             continue
         }
         $normalizedDirs = @($collectedDirs | ForEach-Object { Add-TrailingSlash $_ } | Sort-Object -Unique)
+        $totalDiscovered = $normalizedDirs.Count
         $decodedMap = @{}
         $rawMap = @{}
         foreach ($dir in $normalizedDirs) {
@@ -155,10 +156,19 @@ function Invoke-LinkExplorer {
         
         $sortedDirs = $finalDirs | Sort-Object
         $leafDirs = $nonEmptyLeafDirs
-        Write-Host "Total directories discovered: $($finalDirs.Count)" -ForegroundColor Green
-        Write-Host "Leaf directories: $($leafDirs.Count)" -ForegroundColor Green
-        if ($script:ExplorerSkippedBlocked -gt 0) { Write-Host "Blocked directories filtered: $script:ExplorerSkippedBlocked" -ForegroundColor Green }
-        if ($emptyCount -gt 0) { Write-Host "Empty directories filtered: $emptyCount" -ForegroundColor Green }
+        $blockedCount = $totalDiscovered - $filteredDirs.Count
+        $totalBlockedCount = $blockedCount + $script:ExplorerSkippedBlocked
+        $parentDirCount = $finalDirs.Count - $nonEmptyLeafDirs.Count
+        
+        Write-Host "Crawl statistics:" -ForegroundColor Cyan
+        Write-Host "  Total discovered: $totalDiscovered" -ForegroundColor Green
+        Write-Host "  Blocked directories: $totalBlockedCount" -ForegroundColor Yellow
+        Write-Host "  After filtering: $($filteredDirs.Count)" -ForegroundColor Green
+        Write-Host "  Parent directories: $parentDirCount" -ForegroundColor Green
+        Write-Host "  Leaf directories (total): $($leafDirs.Count + $emptyCount)" -ForegroundColor Green
+        Write-Host "    - Non-empty leaves: $($leafDirs.Count)" -ForegroundColor Green
+        Write-Host "    - Empty leaves (filtered): $emptyCount" -ForegroundColor Yellow
+        Write-Host "  Final directory count: $($finalDirs.Count)" -ForegroundColor Cyan
         
         Write-Host ""
         Write-Host "Leaf directories found:" -ForegroundColor Cyan
