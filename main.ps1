@@ -16,15 +16,15 @@ $AsciiArt = @'
 '@
 
 $DefaultConfig = @{
-    MediaPlayer      = "mpv"
-    MediaPlayerFlags = @('--save-position-on-quit', '--watch-later-options=start,volume,mute')
-    DownloadPath     = "$PSScriptRoot\downloads"
-    MaxCrawlDepth    = 9
-    RequestTimeoutSec = 8  # HTTP request timeout in seconds (lower = faster failure recovery)
-    HistoryMaxSize   = 50
-    VideoExtensions  = @('.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.m4v', '.vob')
-    DirBlockList     = @('lost found', 'software', 'games', 'e book', 'ebooks', 'tutorial')
-    Tools            = @{
+    MediaPlayer       = "mpv"
+    MediaPlayerFlags  = @('--save-position-on-quit', '--watch-later-options=start,volume,mute')
+    DownloadPath      = "$PSScriptRoot\downloads"
+    MaxCrawlDepth     = 9
+    RequestTimeoutSec = 8
+    HistoryMaxSize    = 50
+    VideoExtensions   = @('.mp4', '.mkv')
+    DirBlockList      = @('lost found', 'software', 'games', 'e book', 'ebooks', 'tutorial')
+    Tools             = @{
         fzf    = ""
         aria2c = ""
         jq     = ""
@@ -40,15 +40,15 @@ $script:Config = Get-MergedConfig $DefaultConfig $UserConfig
 
 if (!(Test-Path $SettingsPath)) {
     $OrderedConfig = [ordered]@{
-        DownloadPath     = $script:Config.DownloadPath
-        HistoryMaxSize   = $script:Config.HistoryMaxSize
-        MaxCrawlDepth    = $script:Config.MaxCrawlDepth
+        DownloadPath      = $script:Config.DownloadPath
+        HistoryMaxSize    = $script:Config.HistoryMaxSize
+        MaxCrawlDepth     = $script:Config.MaxCrawlDepth
         RequestTimeoutSec = $script:Config.RequestTimeoutSec
-        MediaPlayer      = $script:Config.MediaPlayer
-        MediaPlayerFlags = $script:Config.MediaPlayerFlags
-        VideoExtensions  = $script:Config.VideoExtensions
-        DirBlockList     = $script:Config.DirBlockList
-        Tools                = $script:Config.Tools
+        MediaPlayer       = $script:Config.MediaPlayer
+        MediaPlayerFlags  = $script:Config.MediaPlayerFlags
+        VideoExtensions   = $script:Config.VideoExtensions
+        DirBlockList      = $script:Config.DirBlockList
+        Tools             = $script:Config.Tools
     }
     $OrderedConfig | ConvertTo-Json -Depth 5 | Set-Content $SettingsPath -Encoding UTF8
     Write-Host "Created default config: $SettingsPath" -ForegroundColor Green
@@ -157,9 +157,9 @@ function Invoke-IndexOperation {
             $parts = $line -split "`t", 3
             if ($parts.Count -ge 2) {
                 $null = $selectedSources.Add([PSCustomObject]@{
-                    url  = $parts[0]
-                    type = $parts[1]
-                })
+                        url  = $parts[0]
+                        type = $parts[1]
+                    })
             }
         }
         
@@ -698,25 +698,28 @@ while ($true) {
         '7' {
             Show-Menu -Title "Miscellaneous" -HasBack -HasQuit -Options @{
                 '1' = @{ Label = 'Current Files'; Action = {
-                    Show-Menu -Title "Current Files" -HasBack -HasQuit -Options @{
-                        '1' = @{ Label = 'View Files'; Action = { Show-CurrentFiles } }
-                        '2' = @{ Label = 'Remove Files'; Action = { Remove-CurrentFiles } }
-                        '3' = @{ Label = 'Backup Files'; Action = { Backup-CurrentFiles } }
+                        Show-Menu -Title "Current Files" -HasBack -HasQuit -Options @{
+                            '1' = @{ Label = 'View Files'; Action = { Show-CurrentFiles } }
+                            '2' = @{ Label = 'Remove Files'; Action = { Remove-CurrentFiles } }
+                            '3' = @{ Label = 'Backup Files'; Action = { Backup-CurrentFiles } }
+                        }
                     }
-                }}
+                }
                 '2' = @{ Label = 'Backup Files'; Action = {
-                    Show-Menu -Title "Backup Files" -HasBack -HasQuit -Options @{
-                        '1' = @{ Label = 'View Files'; Action = { Show-BackupFiles } }
-                        '2' = @{ Label = 'Remove Files'; Action = { Remove-BackupFiles } }
-                        '3' = @{ Label = 'Restore Files'; Action = { Restore-BackupFiles } }
+                        Show-Menu -Title "Backup Files" -HasBack -HasQuit -Options @{
+                            '1' = @{ Label = 'View Files'; Action = { Show-BackupFiles } }
+                            '2' = @{ Label = 'Remove Files'; Action = { Remove-BackupFiles } }
+                            '3' = @{ Label = 'Restore Files'; Action = { Restore-BackupFiles } }
+                        }
                     }
-                }}
+                }
                 '3' = @{ Label = 'Log Files'; Action = {
-                    Show-Menu -Title "Log Files" -HasBack -HasQuit -Options @{
-                        '1' = @{ Label = 'View Files'; Action = { Show-LogFiles } }
-                        '2' = @{ Label = 'Remove Files'; Action = { Remove-LogFiles } }
+                        Show-Menu -Title "Log Files" -HasBack -HasQuit -Options @{
+                            '1' = @{ Label = 'View Files'; Action = { Show-LogFiles } }
+                            '2' = @{ Label = 'Remove Files'; Action = { Remove-LogFiles } }
+                        }
                     }
-                }}
+                }
             }
         }
         default { Write-Host "Invalid option. Try again." }
