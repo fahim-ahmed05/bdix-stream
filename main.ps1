@@ -28,6 +28,7 @@ $DefaultConfig = @{
         fzf    = ""
         aria2c = ""
         jq     = ""
+        curl   = ""
         edit   = ""
     }
 }
@@ -57,6 +58,7 @@ $_toolPaths = Test-Tools -ToolsConfig $script:Config.Tools
 $script:fzfPath = $_toolPaths.fzf
 $script:aria2cPath = $_toolPaths.aria2c
 $script:jqPath = $_toolPaths.jq
+$script:curlPath = $_toolPaths.curl
 $script:editPath = $_toolPaths.edit
 
 $global:DirBlockSet = Get-DirBlockSet

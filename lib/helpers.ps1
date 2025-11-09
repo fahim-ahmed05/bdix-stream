@@ -219,13 +219,24 @@ function Resolve-Tool {
 function Test-Tools {
     param([hashtable]$ToolsConfig)
     $required = @('fzf', 'aria2c', 'jq', 'edit')
+    $optional = @('curl')  # curl is usually in system PATH on Windows
     $resolved = @{}
     $missing = @()
+    
+    # Test required tools
     foreach ($name in $required) {
         $custom = if ($ToolsConfig.ContainsKey($name)) { $ToolsConfig[$name] } else { '' }
         $path = Resolve-Tool -Name $name -CustomPath $custom
         if ($path) { $resolved[$name] = $path } else { $missing += $name }
     }
+    
+    # Test optional tools (don't fail if missing)
+    foreach ($name in $optional) {
+        $custom = if ($ToolsConfig.ContainsKey($name)) { $ToolsConfig[$name] } else { '' }
+        $path = Resolve-Tool -Name $name -CustomPath $custom
+        if ($path) { $resolved[$name] = $path }
+    }
+    
     if ($missing.Count -gt 0) {
         Write-Host "ERROR: Missing required external tools: $($missing -join ', ')" -ForegroundColor Red
         Write-Host "Hint: Add explicit paths under Tools in settings.json or ensure they are in PATH." -ForegroundColor Yellow
@@ -424,6 +435,9 @@ function Invoke-SafeWebRequest {
     )
     try {
         # Use curl for faster HTTP requests (3-5x faster than Invoke-WebRequest)
+        # Use configured curl path or system curl
+        $curlExe = if ($script:curlPath) { $script:curlPath } else { 'curl' }
+        
         $curlArgs = @(
             '--silent',           # No progress bar
             '--show-error',       # Show errors
@@ -434,7 +448,7 @@ function Invoke-SafeWebRequest {
             $Url
         )
         
-        $content = & curl @curlArgs 2>$null
+        $content = & $curlExe @curlArgs 2>$null
         
         if ($LASTEXITCODE -eq 0 -and $content) {
             # Return a response-like object for compatibility

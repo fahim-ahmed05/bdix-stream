@@ -37,21 +37,31 @@ The first time, it will create a settings file. You can change things like where
 ```json
 {
    "DownloadPath": "$PSScriptRoot\\downloads",
+   "HistoryMaxSize": 50,
+   "MaxCrawlDepth": 9,
+   "RequestTimeoutSec": 8,
    "MediaPlayer": "mpv",
    "MediaPlayerFlags": [
       "--save-position-on-quit",
       "--watch-later-options=start,volume,mute"
    ],
-   "VideoExtensions": [".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".m4v"],
-   "DirBlockList": ["lost found", "software", "games", "e book", "ebooks"],
+   "VideoExtensions": [".mp4", ".mkv", ".avi", ".mov", ".flv", ".webm", ".m4v", ".vob"],
+   "DirBlockList": ["lost found", "software", "games", "e book", "ebooks", "tutorial"],
    "Tools": {
       "fzf": "",
       "aria2c": "",
       "jq": "",
+      "curl": "",
       "edit": ""
    }
 }
 ```
+
+**Configuration Options:**
+- `RequestTimeoutSec`: HTTP request timeout in seconds (default: 8). Lower values speed up indexing but may skip slow servers.
+- `MaxCrawlDepth`: Maximum directory depth to crawl (default: 9).
+- `HistoryMaxSize`: Maximum number of entries to keep in watch history (default: 50).
+- `Tools.curl`: Path to custom curl executable. Leave empty to use system curl (recommended).
 
 ### Create a Shortcut
 
