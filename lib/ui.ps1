@@ -386,9 +386,10 @@ function Remove-InaccessibleSources {
     $script:H5aiSites = @($H5aiSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     $script:ApacheSites = @($ApacheSites | Where-Object { -not $rootSet.ContainsKey((Add-TrailingSlash $_.url)) })
     Set-Urls -H5ai $script:H5aiSites -Apache $script:ApacheSites
-    $crawlLeft = (Get-CrawlMeta)
-    $filesLeft = $crawlLeft.files.Count
-    $dirsLeft = $crawlLeft.dirs.Count
+    
+    # Use already-built crawlNew instead of re-reading from disk
+    $filesLeft = $crawlNew.files.Count
+    $dirsLeft = $crawlNew.dirs.Count
     $srcLeft = ($script:H5aiSites.Count + $script:ApacheSites.Count)
     Write-Host "Purge complete." -ForegroundColor Green
     Write-Host "Remaining -> Sources: $srcLeft | Files: $filesLeft | Dirs: $dirsLeft" -ForegroundColor Green

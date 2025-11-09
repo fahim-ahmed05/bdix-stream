@@ -222,15 +222,18 @@ function Invoke-IndexOperation {
         Write-Host ""
         
         if (-not $quickUpdate) {
+            # Load crawler state once for analysis (will be reused later)
+            Write-Host "Loading existing crawler state..." -ForegroundColor Cyan
+            $CrawlMeta = Get-CrawlMeta
+            
             # Analyze existing state for missing timestamps and empty directories
-            $CrawlMetaTemp = Get-CrawlMeta
             Write-Host "Analyzing existing crawler state..." -ForegroundColor Cyan
             $existingMissingDirs = [System.Collections.ArrayList]::new()
             $existingEmptyDirs = [System.Collections.ArrayList]::new()
             $filesPerMissingDir = @{}
             
-            foreach ($dirUrl in $CrawlMetaTemp.dirs.Keys) {
-                $entry = $CrawlMetaTemp.dirs[$dirUrl]
+            foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
+                $entry = $CrawlMeta.dirs[$dirUrl]
                 if (-not $entry.ContainsKey('last_modified')) {
                     $null = $existingMissingDirs.Add($dirUrl)
                     $filesPerMissingDir[$dirUrl] = 0
@@ -244,7 +247,7 @@ function Invoke-IndexOperation {
             if ($existingMissingDirs.Count -gt 0) {
                 # Sort by length descending for faster matching
                 $sortedMissingDirs = $existingMissingDirs | Sort-Object -Property Length -Descending
-                foreach ($fileUrl in $CrawlMetaTemp.files.Keys) {
+                foreach ($fileUrl in $CrawlMeta.files.Keys) {
                     foreach ($dirUrl in $sortedMissingDirs) {
                         if ($fileUrl.StartsWith($dirUrl)) {
                             $filesPerMissingDir[$dirUrl]++
@@ -315,10 +318,13 @@ function Invoke-IndexOperation {
     # Load or create crawler state
     $loadExisting = ($Mode -eq 'update') -or ($isIncremental) -or ($onlyNew)
     if ($loadExisting) {
-        if ($Mode -ne 'build') {
-            Write-Host "Loading existing crawler state..." -ForegroundColor Cyan
+        # Skip loading if already loaded during update analysis
+        if (-not $CrawlMeta) {
+            if ($Mode -ne 'build') {
+                Write-Host "Loading existing crawler state..." -ForegroundColor Cyan
+            }
+            $CrawlMeta = Get-CrawlMeta
         }
-        $CrawlMeta = Get-CrawlMeta
     }
     else {
         $CrawlMeta = @{ dirs = @{}; files = @{} }
