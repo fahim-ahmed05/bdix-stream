@@ -285,7 +285,6 @@ function Invoke-IndexOperation {
     }
     
     # Initialize data structures
-    $Visited = @{}
     Reset-CrawlStats
     $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     
@@ -344,6 +343,9 @@ function Invoke-IndexOperation {
         $siteNum++
         $isApache = ($src.type -eq 'apache')
         $actionText = if ($Mode -eq 'update') { "Updating" } else { "Indexing" }
+        
+        # Reset visited URLs for each source to prevent cross-source URL collision
+        $Visited = @{}
         
         if ($resuming -and $i -eq $startIndex) {
             Write-Host "[$siteNum/$totalSites] Resuming -> $($src.url)" -ForegroundColor Green
