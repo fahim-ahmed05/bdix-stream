@@ -242,8 +242,10 @@ function Invoke-IndexOperation {
             
             $existingMissingFileCount = 0
             if ($existingMissingDirs.Count -gt 0) {
+                # Sort by length descending for faster matching
+                $sortedMissingDirs = $existingMissingDirs | Sort-Object -Property Length -Descending
                 foreach ($fileUrl in $CrawlMetaTemp.files.Keys) {
-                    foreach ($dirUrl in $existingMissingDirs) {
+                    foreach ($dirUrl in $sortedMissingDirs) {
                         if ($fileUrl.StartsWith($dirUrl)) {
                             $filesPerMissingDir[$dirUrl]++
                             $existingMissingFileCount++
@@ -550,10 +552,13 @@ function Remove-InvalidIndexEntries {
     $apacheRootSet = @{}
     foreach ($s in $ApacheSites) { $apacheRootSet[$s.url] = $true }
     
+    # Convert to array for faster iteration
+    $apacheRootArray = @($apacheRootSet.Keys)
+    
     foreach ($dirUrl in $dirKeys) {
         # Check if URL starts with any Apache root (faster hashtable lookup)
         $isApache = $false
-        foreach ($root in $apacheRootSet.Keys) {
+        foreach ($root in $apacheRootArray) {
             if ($dirUrl.StartsWith($root)) { $isApache = $true; break }
         }
 

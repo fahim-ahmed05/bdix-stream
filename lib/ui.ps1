@@ -332,13 +332,17 @@ function Remove-InaccessibleSources {
     $fileCount = $crawl.files.Count
     $dirCount = $crawl.dirs.Count
     $fileRemove = 0; $dirRemove = 0
+    
+    # Convert to array for faster iteration
+    $rootArray = @($rootSet.Keys)
+    
     foreach ($k in $crawl.files.Keys) {
-        foreach ($r in $rootSet.Keys) {
+        foreach ($r in $rootArray) {
             if ($k.StartsWith($r)) { $fileRemove++; break }
         }
     }
     foreach ($k in $crawl.dirs.Keys) {
-        foreach ($r in $rootSet.Keys) {
+        foreach ($r in $rootArray) {
             if ($k.StartsWith($r)) { $dirRemove++; break }
         }
     }
@@ -358,16 +362,20 @@ function Remove-InaccessibleSources {
     
     Write-Host "Processing crawler state..." -ForegroundColor Cyan
     $crawlNew = @{ dirs = @{}; files = @{} }
+    
+    # Convert to array for faster iteration
+    $rootArray = @($rootSet.Keys)
+    
     foreach ($k in $crawl.dirs.Keys) {
         $keep = $true
-        foreach ($r in $rootSet.Keys) {
+        foreach ($r in $rootArray) {
             if ($k.StartsWith($r)) { $keep = $false; break }
         }
         if ($keep) { $crawlNew.dirs[$k] = $crawl.dirs[$k] }
     }
     foreach ($k in $crawl.files.Keys) {
         $keep = $true
-        foreach ($r in $rootSet.Keys) {
+        foreach ($r in $rootArray) {
             if ($k.StartsWith($r)) { $keep = $false; break }
         }
         if ($keep) { $crawlNew.files[$k] = $crawl.files[$k] }
