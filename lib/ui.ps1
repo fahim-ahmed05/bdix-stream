@@ -474,6 +474,80 @@ function Invoke-SearchInteraction {
 function Invoke-StreamSearch { Invoke-SearchInteraction -Mode Stream }
 function Invoke-DownloadSearch { Invoke-SearchInteraction -Mode Download }
 
+function Watch-DownloadedFiles {
+    Show-Header "Watch Downloaded"
+    
+    $downloadPath = $script:Config.DownloadPath
+    if (!(Test-Path $downloadPath)) {
+        Write-Host "Download folder not found: $downloadPath" -ForegroundColor Red
+        Write-Host "No files to watch." -ForegroundColor Yellow
+        Wait-Return "Press Enter to return..."
+        return
+    }
+    
+    Write-Host "Searching for videos in: $downloadPath" -ForegroundColor Cyan
+    Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
+    Write-Host ""
+    
+    # Get all video files from download directory
+    $videoExtensions = $script:Config.VideoExtensions
+    $videoFiles = Get-ChildItem -Path $downloadPath -File -Recurse | Where-Object {
+        $ext = $_.Extension.ToLower()
+        $videoExtensions -contains $ext
+    }
+    
+    if ($videoFiles.Count -eq 0) {
+        Write-Host "No video files found in download folder." -ForegroundColor Yellow
+        Wait-Return "Press Enter to return..."
+        return
+    }
+    
+    Write-Host "Found $($videoFiles.Count) video file(s)." -ForegroundColor Green
+    Write-Host ""
+    
+    # Prepare display data: filename + full path
+    $displayLines = foreach ($file in $videoFiles) {
+        $relativePath = $file.FullName.Substring($downloadPath.Length).TrimStart('\', '/')
+        "$relativePath`t$($file.FullName)"
+    }
+    
+    $lastQuery = ''
+    while ($true) {
+        $selected = Invoke-Fzf -InputData $displayLines -Prompt 'Search: ' -WithNth '1' -Height 20 -Delimiter "`t" -Query $lastQuery -PrintQuery $true
+        if (!$selected) { return }
+        
+        $outLines = $selected -split "`n" | Where-Object { $_ }
+        if ($outLines.Count -ge 1) { $lastQuery = $outLines[0] }
+        if ($outLines.Count -ge 2) { $selected = $outLines[1] } else { if ($LASTEXITCODE -ne 0) { return } else { continue } }
+        
+        if ($LASTEXITCODE -ne 0) { return }
+        
+        $parts = $selected -split "`t", 2
+        if ($parts.Count -lt 2) { continue }
+        
+        $filePath = $parts[1]
+        $fileName = $parts[0]
+        
+        if (!(Test-Path $filePath)) {
+            Write-Host "File not found: $filePath" -ForegroundColor Red
+            Start-Sleep -Seconds 2
+            Show-Header "Watch Downloaded"
+            Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
+            Write-Host ""
+            continue
+        }
+        
+        Write-Host "Playing: $fileName" -ForegroundColor Green
+        $playerArgs = @($script:Config.MediaPlayerFlags) + @($filePath)
+        & $script:Config.MediaPlayer $playerArgs
+        
+        # Return to search with preserved query
+        Show-Header "Watch Downloaded"
+        Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
+        Write-Host ""
+    }
+}
+
 # Unified backup file operations handler
 function Invoke-BackupIndexStream {
     param([string]$BackupFilePath, [string]$InitialQuery = '')

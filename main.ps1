@@ -640,7 +640,12 @@ while ($true) {
                 '4' = @{ Label = 'Prune Index'; Action = { Remove-InvalidIndexEntries } }
             }
         }
-        '5' { Invoke-DownloadSearch }
+        '5' {
+            Show-Menu -Title "Download Media" -HasBack -HasQuit -Options @{
+                '1' = @{ Label = 'Download from Index'; Action = { Invoke-DownloadSearch } }
+                '2' = @{ Label = 'Watch Downloaded'; Action = { Watch-DownloadedFiles } }
+            }
+        }
         '6' {
             Show-Menu -Title "Manage Sources" -HasBack -HasQuit -Options @{
                 '1' = @{ Label = 'Add Source'; Action = { Add-Source } }
