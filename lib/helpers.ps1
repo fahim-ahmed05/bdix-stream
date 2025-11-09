@@ -109,19 +109,17 @@ function Write-AppLog {
 
 function Write-MissingTimestampLog {
     param([hashtable]$CrawlMeta, [string]$LogPath)
-    $missingDirs = [System.Collections.ArrayList]::new()
+    
+    # Use already-collected list from indexing (much faster!)
+    if ($script:MissingDateDirs.Count -eq 0) { return 0 }
+    
+    $missingDirs = $script:MissingDateDirs
     $fileCountMap = @{}
     
-    # Collect dirs without timestamps
-    foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
-        $entry = $CrawlMeta.dirs[$dirUrl]
-        if (-not $entry.ContainsKey('last_modified')) { 
-            $null = $missingDirs.Add($dirUrl)
-            $fileCountMap[$dirUrl] = 0
-        }
+    # Initialize counts
+    foreach ($dirUrl in $missingDirs) {
+        $fileCountMap[$dirUrl] = 0
     }
-    
-    if ($missingDirs.Count -eq 0) { return 0 }
     
     # Sort missing dirs by length descending for more efficient matching
     $sortedMissingDirs = $missingDirs | Sort-Object -Property Length -Descending
@@ -423,6 +421,7 @@ function Reset-CrawlStats {
     $script:SkippedBlockedDirs = 0
     $script:BlockedDirUrls = @()
     $script:NoLongerEmptyCount = 0
+    $script:EmptyDirCount = 0
 }
 
 function Show-Menu {

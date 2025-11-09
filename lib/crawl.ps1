@@ -66,6 +66,7 @@ function Invoke-IndexCrawl {
         # Add empty flag only if directory is empty
         if ($isEmpty) {
             $CrawlMetaRef.dirs[$normUrl]['empty'] = $true
+            if ($TrackStats) { $script:EmptyDirCount++ }
         }
         
         if ($TrackStats -and $isNewDir) { $script:NewDirs++ }
