@@ -421,7 +421,8 @@ function Show-WatchHistory {
     $url = $parts[1]; $name = $parts[0]
     Write-Host "Playing from history: $name" -ForegroundColor Green
     Add-HistoryEntry -Name $name -Url $url
-    & $script:Config.MediaPlayer $url
+    $playerArgs = @($script:Config.MediaPlayerFlags) + @($url)
+    & $script:Config.MediaPlayer $playerArgs
 }
 
 function Invoke-SearchInteraction {
@@ -462,7 +463,7 @@ function Invoke-SearchInteraction {
     $parts = $selected -split "`t", 2
     if ($parts.Count -lt 2) { return }
     $url = $parts[1]; $name = if ($parts[0] -ne "-") { $parts[0] } else { [System.IO.Path]::GetFileName($url) }
-    if ($Mode -eq "Stream") { Write-Host "Streaming: $name" -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url; & $script:Config.MediaPlayer $url; $nextQuery = if ($script:LastStreamQuery) { $script:LastStreamQuery } else { $name }; Invoke-SearchInteraction -Mode Stream -InitialQuery $nextQuery }
+    if ($Mode -eq "Stream") { Write-Host "Streaming: $name" -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url; $playerArgs = @($script:Config.MediaPlayerFlags) + @($url); & $script:Config.MediaPlayer $playerArgs; $nextQuery = if ($script:LastStreamQuery) { $script:LastStreamQuery } else { $name }; Invoke-SearchInteraction -Mode Stream -InitialQuery $nextQuery }
     else {
         Write-Host "Selected for download: $name" -ForegroundColor Green
         Invoke-Download -Url $url -Name $name
@@ -514,7 +515,8 @@ function Invoke-BackupIndexStream {
         
         Write-Host "Streaming: $name" -ForegroundColor Green
         Add-HistoryEntry -Name $name -Url $url
-        & $script:Config.MediaPlayer $url
+        $playerArgs = @($script:Config.MediaPlayerFlags) + @($url)
+        & $script:Config.MediaPlayer $playerArgs
         
         # Return to search with last query
         Show-Header "Backup Index Stream"
@@ -778,6 +780,7 @@ function Invoke-ResumeLastPlayed {
     if (!$last) { Write-Host "Nothing to resume." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     Write-Host "Resuming: $($last.Name)" -ForegroundColor Green
     Add-HistoryEntry -Name $last.Name -Url $last.Url
-    & $script:Config.MediaPlayer $last.Url
+    $playerArgs = @($script:Config.MediaPlayerFlags) + @($last.Url)
+    & $script:Config.MediaPlayer $playerArgs
 }
 

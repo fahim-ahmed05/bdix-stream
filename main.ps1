@@ -16,13 +16,14 @@ $AsciiArt = @'
 '@
 
 $DefaultConfig = @{
-    MediaPlayer     = "mpv"
-    DownloadPath    = "$PSScriptRoot\downloads"
-    MaxCrawlDepth   = 9
-    HistoryMaxSize  = 50
-    VideoExtensions = @('.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.m4v')
-    DirBlockList    = @('lost found', 'software', 'games', 'e book', 'ebooks')
-    Tools           = @{
+    MediaPlayer      = "mpv"
+    MediaPlayerFlags = @('--save-position-on-quit', '--watch-later-options=start,volume,mute')
+    DownloadPath     = "$PSScriptRoot\downloads"
+    MaxCrawlDepth    = 9
+    HistoryMaxSize   = 50
+    VideoExtensions  = @('.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.m4v')
+    DirBlockList     = @('lost found', 'software', 'games', 'e book', 'ebooks')
+    Tools            = @{
         fzf    = ""
         aria2c = ""
         jq     = ""
@@ -37,13 +38,14 @@ $script:Config = Get-MergedConfig $DefaultConfig $UserConfig
 
 if (!(Test-Path $SettingsPath)) {
     $OrderedConfig = [ordered]@{
-        DownloadPath    = $script:Config.DownloadPath
-        HistoryMaxSize  = $script:Config.HistoryMaxSize
-        MaxCrawlDepth   = $script:Config.MaxCrawlDepth
-        MediaPlayer     = $script:Config.MediaPlayer
-        VideoExtensions = $script:Config.VideoExtensions
-        DirBlockList    = $script:Config.DirBlockList
-        Tools           = $script:Config.Tools
+        DownloadPath     = $script:Config.DownloadPath
+        HistoryMaxSize   = $script:Config.HistoryMaxSize
+        MaxCrawlDepth    = $script:Config.MaxCrawlDepth
+        MediaPlayer      = $script:Config.MediaPlayer
+        MediaPlayerFlags = $script:Config.MediaPlayerFlags
+        VideoExtensions  = $script:Config.VideoExtensions
+        DirBlockList     = $script:Config.DirBlockList
+        Tools            = $script:Config.Tools
     }
     $OrderedConfig | ConvertTo-Json -Depth 5 | Set-Content $SettingsPath -Encoding UTF8
     Write-Host "Created default config: $SettingsPath" -ForegroundColor Green
