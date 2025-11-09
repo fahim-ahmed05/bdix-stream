@@ -123,9 +123,13 @@ function Write-MissingTimestampLog {
     
     if ($missingDirs.Count -eq 0) { return 0 }
     
-    # Count files under missing dirs
+    # Sort missing dirs by length descending for more efficient matching
+    $sortedMissingDirs = $missingDirs | Sort-Object -Property Length -Descending
+    
+    # Count files under missing dirs (optimized to avoid nested loop)
     foreach ($fileUrl in $CrawlMeta.files.Keys) {
-        foreach ($dirUrl in $missingDirs) {
+        # Check longest paths first for faster matching
+        foreach ($dirUrl in $sortedMissingDirs) {
             if ($fileUrl.StartsWith($dirUrl)) {
                 $fileCountMap[$dirUrl]++
                 break

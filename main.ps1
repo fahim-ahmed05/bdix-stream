@@ -405,19 +405,27 @@ function Invoke-IndexOperation {
     }
     
     Write-Host ""
+    Write-Host "Finalizing..." -ForegroundColor Cyan
     
-    # Log missing timestamps and blocked dirs
-    $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
-    if ($missingCount -gt 0) {
-        Write-Host "Logged $missingCount directories lacking last_modified to: $MissingTimestampsLogPath" -ForegroundColor Yellow
+    # Only do detailed logging if something changed
+    $totalChanges = $script:NewDirs + $script:NewFiles
+    if ($totalChanges -gt 0) {
+        # Log missing timestamps and blocked dirs
+        $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
+        if ($missingCount -gt 0) {
+            Write-Host "Logged $missingCount directories lacking last_modified to: $MissingTimestampsLogPath" -ForegroundColor Yellow
+        }
+        else {
+            Write-Host "All directories have last_modified. No log entry written." -ForegroundColor Green
+        }
+        
+        if ($script:SkippedBlockedDirs -gt 0 -and $script:BlockedDirUrls.Count -gt 0) {
+            $blockedWritten = Write-BlockedDirsLog -BlockedUrls $script:BlockedDirUrls
+            Write-Host "Blocked directories skipped: $script:SkippedBlockedDirs (logged $blockedWritten to $BlockedDirsLogPath)" -ForegroundColor Yellow
+        }
     }
     else {
-        Write-Host "All directories have last_modified. No log entry written." -ForegroundColor Green
-    }
-    
-    if ($script:SkippedBlockedDirs -gt 0 -and $script:BlockedDirUrls.Count -gt 0) {
-        $blockedWritten = Write-BlockedDirsLog -BlockedUrls $script:BlockedDirUrls
-        Write-Host "Blocked directories skipped: $script:SkippedBlockedDirs (logged $blockedWritten to $BlockedDirsLogPath)" -ForegroundColor Yellow
+        Write-Host "No changes detected, skipping detailed logging..." -ForegroundColor DarkGray
     }
     
     # Mark sources as indexed
