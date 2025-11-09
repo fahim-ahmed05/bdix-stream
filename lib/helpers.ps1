@@ -124,25 +124,23 @@ function Write-MissingTimestampLog {
     $missingDirs = [System.Collections.ArrayList]::new()
     $fileCountMap = @{}
     
-    # Single pass: collect missing dirs and initialize file counts
-    foreach ($k in $CrawlMeta.Keys) {
-        $entry = $CrawlMeta[$k]
-        if ($entry.type -eq 'dir' -and -not $entry.ContainsKey('last_modified')) { 
-            $null = $missingDirs.Add($k)
-            $fileCountMap[$k] = 0
+    # Collect dirs without timestamps
+    foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
+        $entry = $CrawlMeta.dirs[$dirUrl]
+        if (-not $entry.ContainsKey('last_modified')) { 
+            $null = $missingDirs.Add($dirUrl)
+            $fileCountMap[$dirUrl] = 0
         }
     }
     
     if ($missingDirs.Count -eq 0) { return 0 }
     
-    # Second pass: count files only for missing dirs
-    foreach ($k in $CrawlMeta.Keys) {
-        if ($CrawlMeta[$k].type -eq 'file') {
-            foreach ($dirUrl in $missingDirs) {
-                if ($k.StartsWith($dirUrl)) {
-                    $fileCountMap[$dirUrl]++
-                    break
-                }
+    # Count files under missing dirs
+    foreach ($fileUrl in $CrawlMeta.files.Keys) {
+        foreach ($dirUrl in $missingDirs) {
+            if ($fileUrl.StartsWith($dirUrl)) {
+                $fileCountMap[$dirUrl]++
+                break
             }
         }
     }

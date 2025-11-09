@@ -227,29 +227,25 @@ function Invoke-IndexOperation {
             $existingEmptyDirs = [System.Collections.ArrayList]::new()
             $filesPerMissingDir = @{}
             
-            foreach ($k in $CrawlMetaTemp.Keys) {
-                $entry = $CrawlMetaTemp[$k]
-                if ($entry.type -eq 'dir') {
-                    if (-not $entry.ContainsKey('last_modified')) {
-                        $null = $existingMissingDirs.Add($k)
-                        $filesPerMissingDir[$k] = 0
-                    }
-                    if ($entry.ContainsKey('empty') -and $entry['empty']) {
-                        $null = $existingEmptyDirs.Add($k)
-                    }
+            foreach ($dirUrl in $CrawlMetaTemp.dirs.Keys) {
+                $entry = $CrawlMetaTemp.dirs[$dirUrl]
+                if (-not $entry.ContainsKey('last_modified')) {
+                    $null = $existingMissingDirs.Add($dirUrl)
+                    $filesPerMissingDir[$dirUrl] = 0
+                }
+                if ($entry.ContainsKey('empty') -and $entry['empty']) {
+                    $null = $existingEmptyDirs.Add($dirUrl)
                 }
             }
             
             $existingMissingFileCount = 0
             if ($existingMissingDirs.Count -gt 0) {
-                foreach ($fk in $CrawlMetaTemp.Keys) {
-                    if ($CrawlMetaTemp[$fk].type -eq 'file') {
-                        foreach ($dirUrl in $existingMissingDirs) {
-                            if ($fk.StartsWith($dirUrl)) {
-                                $filesPerMissingDir[$dirUrl]++
-                                $existingMissingFileCount++
-                                break
-                            }
+                foreach ($fileUrl in $CrawlMetaTemp.files.Keys) {
+                    foreach ($dirUrl in $existingMissingDirs) {
+                        if ($fileUrl.StartsWith($dirUrl)) {
+                            $filesPerMissingDir[$dirUrl]++
+                            $existingMissingFileCount++
+                            break
                         }
                     }
                 }
@@ -324,7 +320,7 @@ function Invoke-IndexOperation {
     }
     else {
         $Index = @{}
-        $CrawlMeta = @{}
+        $CrawlMeta = @{ dirs = @{}; files = @{} }
     }
     
     # Process sources
@@ -369,10 +365,16 @@ function Invoke-IndexOperation {
             foreach ($k in $keysToRemove) { $Index.Remove($k) }
             
             $keysToRemove = [System.Collections.ArrayList]::new()
-            foreach ($k in $CrawlMeta.Keys) {
+            foreach ($k in $CrawlMeta.dirs.Keys) {
                 if ($k.StartsWith($srcRoot)) { $null = $keysToRemove.Add($k) }
             }
-            foreach ($k in $keysToRemove) { $CrawlMeta.Remove($k) }
+            foreach ($k in $keysToRemove) { $CrawlMeta.dirs.Remove($k) }
+            
+            $keysToRemove = [System.Collections.ArrayList]::new()
+            foreach ($k in $CrawlMeta.files.Keys) {
+                if ($k.StartsWith($srcRoot)) { $null = $keysToRemove.Add($k) }
+            }
+            foreach ($k in $keysToRemove) { $CrawlMeta.files.Remove($k) }
         }
         
         Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -IndexRef $Index -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true
@@ -395,12 +397,6 @@ function Invoke-IndexOperation {
     }
     
     Write-Host ""
-    
-    # Save results
-    Write-Host "Saving index..." -ForegroundColor Cyan
-    $Index.Values | ConvertTo-Json -Depth 10 -Compress | Set-Content $MediaIndexPath -Encoding UTF8
-    Write-Host "Saving crawler state..." -ForegroundColor Cyan
-    Set-CrawlMeta -Meta $CrawlMeta
     
     # Log missing timestamps and blocked dirs
     $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
@@ -447,9 +443,9 @@ function Invoke-IndexOperation {
     # Count empty directories
     Write-Host "Counting empty directories..." -ForegroundColor Cyan
     $emptyDirCount = 0
-    foreach ($k in $CrawlMeta.Keys) {
-        $entry = $CrawlMeta[$k]
-        if ($entry.type -eq 'dir' -and $entry.ContainsKey('empty') -and $entry['empty']) {
+    foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
+        $entry = $CrawlMeta.dirs[$dirUrl]
+        if ($entry.ContainsKey('empty') -and $entry['empty']) {
             $emptyDirCount++
         }
     }
@@ -522,10 +518,8 @@ function Remove-InvalidIndexEntries {
         $allDirsToCrawl[$normRoot] = $true
     }
 
-    foreach ($url in $CrawlMeta.Keys) {
-        if ($CrawlMeta[$url].type -eq "dir") {
-            $allDirsToCrawl[$url] = $true
-        }
+    foreach ($url in $CrawlMeta.dirs.Keys) {
+        $allDirsToCrawl[$url] = $true
     }
 
     $liveUrls = @{}
@@ -577,20 +571,30 @@ function Remove-InvalidIndexEntries {
 
     Write-Host "Analyzing crawler state for dead links..." -ForegroundColor Cyan
     $deadCount = 0
-    $newCrawlMeta = @{}
+    $newCrawlMeta = @{ dirs = @{}; files = @{} }
     $newIndex = @{}
     $deadUrls = [System.Collections.ArrayList]::new()
 
-    foreach ($url in $CrawlMeta.Keys) {
+    foreach ($url in $CrawlMeta.dirs.Keys) {
         if ($liveUrls.ContainsKey($url)) {
-            $newCrawlMeta[$url] = $CrawlMeta[$url]
-            if ($CrawlMeta[$url].type -eq "file" -and $Index.ContainsKey($url)) {
+            $newCrawlMeta.dirs[$url] = $CrawlMeta.dirs[$url]
+        }
+        else {
+            $deadCount++
+            $null = $deadUrls.Add([PSCustomObject]@{ Url = $url; Type = 'dir' })
+        }
+    }
+    
+    foreach ($url in $CrawlMeta.files.Keys) {
+        if ($liveUrls.ContainsKey($url)) {
+            $newCrawlMeta.files[$url] = $true
+            if ($Index.ContainsKey($url)) {
                 $newIndex[$url] = $Index[$url]
             }
         }
         else {
             $deadCount++
-            $null = $deadUrls.Add([PSCustomObject]@{ Url = $url; Type = $CrawlMeta[$url].type })
+            $null = $deadUrls.Add([PSCustomObject]@{ Url = $url; Type = 'file' })
         }
     }
 
