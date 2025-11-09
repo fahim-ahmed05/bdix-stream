@@ -621,23 +621,23 @@ function Invoke-FileOperation {
     )
     
     $titleMap = @{
-        'view-current' = 'View Current Files'
-        'view-backup' = 'View Backup Files'
-        'view-log' = 'View Log Files'
+        'view-current'   = 'View Current Files'
+        'view-backup'    = 'View Backup Files'
+        'view-log'       = 'View Log Files'
         'remove-current' = 'Remove Current Files'
-        'remove-backup' = 'Remove Backup Files'
-        'remove-log' = 'Remove Log Files'
+        'remove-backup'  = 'Remove Backup Files'
+        'remove-log'     = 'Remove Log Files'
         'restore-backup' = 'Restore Backup Files'
         'backup-current' = 'Backup Current Files'
     }
     
     $promptMap = @{
-        'view-current' = 'File: '
-        'view-backup' = 'Backup: '
-        'view-log' = 'Log: '
+        'view-current'   = 'File: '
+        'view-backup'    = 'Backup: '
+        'view-log'       = 'Log: '
         'remove-current' = 'Files:'
-        'remove-backup' = 'Backups:'
-        'remove-log' = 'Logs:'
+        'remove-backup'  = 'Backups:'
+        'remove-log'     = 'Logs:'
         'restore-backup' = 'Restore: '
         'backup-current' = 'Backup: '
     }
@@ -651,12 +651,12 @@ function Invoke-FileOperation {
         while ($true) {
             Show-Header $title
             $files = if ($FileSource -eq 'backup') { Get-BackupFiles } 
-                     elseif ($FileSource -eq 'log') { Get-LogFiles }
-                     else { Get-CurrentFiles }
+            elseif ($FileSource -eq 'log') { Get-LogFiles }
+            else { Get-CurrentFiles }
             if ($files.Count -eq 0) {
                 $msg = if ($FileSource -eq 'backup') { "No backup files found." } 
-                       elseif ($FileSource -eq 'log') { "No log files found." }
-                       else { "No current files found." }
+                elseif ($FileSource -eq 'log') { "No log files found." }
+                else { "No current files found." }
                 Write-Host $msg -ForegroundColor Yellow
                 Wait-Return "Press Enter to return..."
                 return
@@ -664,7 +664,8 @@ function Invoke-FileOperation {
             
             if ($FileSource -eq 'backup') {
                 Write-Host "Tip: Select crawler-state backup to stream, other files to edit. ESC to return." -ForegroundColor Yellow
-            } else {
+            }
+            else {
                 Write-Host "Tip: press ESC to return." -ForegroundColor Yellow
             }
             Write-Host ""
@@ -697,8 +698,8 @@ function Invoke-FileOperation {
         # Remove mode
         Remove-SelectableItems -Title $title -Prompt $prompt -GetItemsScript {
             $files = if ($FileSource -eq 'backup') { Get-BackupFiles } 
-                     elseif ($FileSource -eq 'log') { Get-LogFiles }
-                     else { Get-CurrentFiles }
+            elseif ($FileSource -eq 'log') { Get-LogFiles }
+            else { Get-CurrentFiles }
             foreach ($f in $files) { (Split-Path $f -Leaf) + "`t" + $f }
         } -RemoveScript {
             param($selectedLines)

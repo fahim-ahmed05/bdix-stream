@@ -159,7 +159,7 @@ function Write-IssueDirs {
     foreach ($dirUrl in $problematicDirs.Keys) {
         $entry = $CrawlMeta.dirs[$dirUrl]
         $obj = [PSCustomObject]@{
-            url = $dirUrl
+            url   = $dirUrl
             files = $problematicDirs[$dirUrl]
         }
         
@@ -425,7 +425,7 @@ function Invoke-SafeWebRequest {
         if ($LASTEXITCODE -eq 0 -and $content) {
             # Return a response-like object for compatibility
             return [PSCustomObject]@{
-                Content = $content -join "`n"
+                Content    = $content -join "`n"
                 StatusCode = 200
             }
         }
@@ -614,15 +614,15 @@ function Save-IndexProgress {
     )
     
     $progress = @{
-        mode = $Mode
-        timestamp = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
+        mode               = $Mode
+        timestamp          = (Get-Date).ToString('yyyy-MM-dd HH:mm:ss')
         currentSourceIndex = $CurrentIndex
-        totalSources = $SourcesList.Count
-        sourcesToProcess = $SourcesList
-        config = @{
+        totalSources       = $SourcesList.Count
+        sourcesToProcess   = $SourcesList
+        config             = @{
             isIncremental = $IsIncremental
-            onlyNew = $OnlyNew
-            forceSet = $ForceSet
+            onlyNew       = $OnlyNew
+            forceSet      = $ForceSet
         }
     }
     
