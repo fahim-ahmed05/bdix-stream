@@ -10,9 +10,17 @@ function Invoke-IndexCrawl {
     )
     if ($Depth -lt 0 -or $Visited[$Url]) { return }
     $Visited[$Url] = $true
+    
+    # Live progress indicator
+    if ($TrackStats) {
+        Write-Host "  → Crawling: $Url" -ForegroundColor DarkGray -NoNewline
+        Write-Host "`r" -NoNewline  # Carriage return to overwrite line
+    }
+    
     if (Test-IsBlockedUrl -Url $Url -BlockSet $global:DirBlockSet) { if ($TrackStats) { $script:SkippedBlockedDirs++ ; $script:BlockedDirUrls += $Url } ; return }
     
-    $response = Invoke-SafeWebRequest -Url $Url -TimeoutSec 12
+    $timeoutSec = if ($script:Config.RequestTimeoutSec) { $script:Config.RequestTimeoutSec } else { 12 }
+    $response = Invoke-SafeWebRequest -Url $Url -TimeoutSec $timeoutSec
     if (-not $response) { return }
     $html = $response.Content
     
@@ -45,11 +53,9 @@ function Invoke-IndexCrawl {
         $isEmpty = ($videos.Count -eq 0 -and $dirs.Count -eq 0)
         
         # Check if directory was empty but now has content
-        $wasEmpty = $false
         if ($CrawlMetaRef.dirs.ContainsKey($normUrl)) {
             $oldMeta = $CrawlMetaRef.dirs[$normUrl]
             if ($oldMeta.ContainsKey('empty') -and $oldMeta['empty'] -and -not $isEmpty) {
-                $wasEmpty = $true
                 if ($TrackStats) { $script:NoLongerEmptyCount++ }
             }
         }
