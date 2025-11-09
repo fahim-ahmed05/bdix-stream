@@ -146,12 +146,13 @@ function Invoke-IndexOperation {
             return
         }
         
-        # Convert to common format
+        # Convert to common format using ArrayList for better performance
+        $sourcesToProcess = [System.Collections.ArrayList]::new()
         foreach ($s in $h5aiToProcess) {
-            $sourcesToProcess += [PSCustomObject]@{ url = $s.url; type = 'h5ai'; originalSite = $s }
+            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'h5ai'; originalSite = $s })
         }
         foreach ($s in $apacheToProcess) {
-            $sourcesToProcess += [PSCustomObject]@{ url = $s.url; type = 'apache'; originalSite = $s }
+            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'apache'; originalSite = $s })
         }
         
     }
@@ -159,11 +160,12 @@ function Invoke-IndexOperation {
         # Update mode - use all sources
         $isIncremental = $true
         
+        $sourcesToProcess = [System.Collections.ArrayList]::new()
         foreach ($s in $H5aiSites) {
-            $sourcesToProcess += [PSCustomObject]@{ url = $s.url; type = 'h5ai' }
+            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'h5ai' })
         }
         foreach ($s in $ApacheSites) {
-            $sourcesToProcess += [PSCustomObject]@{ url = $s.url; type = 'apache' }
+            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'apache' })
         }
         
         if ($sourcesToProcess.Count -eq 0) {
@@ -181,19 +183,19 @@ function Invoke-IndexOperation {
             # Analyze existing state for missing timestamps and empty directories
             $CrawlMetaTemp = Get-CrawlMeta
             Write-Host "Analyzing existing crawler state..." -ForegroundColor Cyan
-            $existingMissingDirs = @()
-            $existingEmptyDirs = @()
+            $existingMissingDirs = [System.Collections.ArrayList]::new()
+            $existingEmptyDirs = [System.Collections.ArrayList]::new()
             $filesPerMissingDir = @{}
             
             foreach ($k in $CrawlMetaTemp.Keys) {
                 $entry = $CrawlMetaTemp[$k]
                 if ($entry.type -eq 'dir') {
                     if (-not $entry.ContainsKey('last_modified')) {
-                        $existingMissingDirs += $k
+                        $null = $existingMissingDirs.Add($k)
                         $filesPerMissingDir[$k] = 0
                     }
                     if ($entry.ContainsKey('empty') -and $entry['empty']) {
-                        $existingEmptyDirs += $k
+                        $null = $existingEmptyDirs.Add($k)
                     }
                 }
             }
@@ -293,15 +295,15 @@ function Invoke-IndexOperation {
             $srcRoot = Add-TrailingSlash $src.url
             $localForceSet[$srcRoot] = $true
             
-            $keysToRemove = @()
+            $keysToRemove = [System.Collections.ArrayList]::new()
             foreach ($k in $Index.Keys) {
-                if ($k.StartsWith($srcRoot)) { $keysToRemove += $k }
+                if ($k.StartsWith($srcRoot)) { $null = $keysToRemove.Add($k) }
             }
             foreach ($k in $keysToRemove) { $Index.Remove($k) }
             
-            $keysToRemove = @()
+            $keysToRemove = [System.Collections.ArrayList]::new()
             foreach ($k in $CrawlMeta.Keys) {
-                if ($k.StartsWith($srcRoot)) { $keysToRemove += $k }
+                if ($k.StartsWith($srcRoot)) { $null = $keysToRemove.Add($k) }
             }
             foreach ($k in $keysToRemove) { $CrawlMeta.Remove($k) }
         }
@@ -320,9 +322,9 @@ function Invoke-IndexOperation {
     
     # Handle backup for build mode
     if ($Mode -eq 'build' -and -not $onlyNew) {
-        $backupPaths = @()
-        if (Test-Path $MediaIndexPath) { $backupPaths += $MediaIndexPath }
-        if (Test-Path $CrawlerStatePath) { $backupPaths += $CrawlerStatePath }
+        $backupPaths = [System.Collections.ArrayList]::new()
+        if (Test-Path $MediaIndexPath) { $null = $backupPaths.Add($MediaIndexPath) }
+        if (Test-Path $CrawlerStatePath) { $null = $backupPaths.Add($CrawlerStatePath) }
         
         if ($backupPaths.Count -gt 0) {
             $b = Backup-Files -Paths $backupPaths
@@ -527,7 +529,7 @@ function Remove-InvalidIndexEntries {
     $deadCount = 0
     $newCrawlMeta = @{}
     $newIndex = @{}
-    $deadUrls = @{}
+    $deadUrls = [System.Collections.ArrayList]::new()
 
     foreach ($url in $CrawlMeta.Keys) {
         if ($liveUrls.ContainsKey($url)) {
@@ -538,7 +540,7 @@ function Remove-InvalidIndexEntries {
         }
         else {
             $deadCount++
-            $deadUrls += [PSCustomObject]@{ Url = $url; Type = $CrawlMeta[$url].type }
+            $null = $deadUrls.Add([PSCustomObject]@{ Url = $url; Type = $CrawlMeta[$url].type })
         }
     }
 

@@ -69,12 +69,12 @@ function Invoke-LinkExplorer {
             $rawMap[$dir] = $lastSegment
         }
         $blockSet = $global:DirBlockSet
-        $filteredDirs = @()
+        $filteredDirs = [System.Collections.ArrayList]::new()
         foreach ($dir in $normalizedDirs) {
             $nameDecoded = $decodedMap[$dir].ToLowerInvariant()
             $nameRaw = $rawMap[$dir].ToLowerInvariant()
             $isBlocked = ($blockSet -contains $nameDecoded) -or ($blockSet -contains $nameRaw)
-            if (-not $isBlocked) { $filteredDirs += $dir }
+            if (-not $isBlocked) { $null = $filteredDirs.Add($dir) }
         }
         if ($filteredDirs.Count -eq 0) {
             Write-Host "No directories found after filtering blocked names." -ForegroundColor Yellow
@@ -82,39 +82,8 @@ function Invoke-LinkExplorer {
             continue
         }
         
-        # Check for empty directories and filter them out
-        Write-Host "Checking for empty directories..." -ForegroundColor Cyan
-        $nonEmptyDirs = [System.Collections.ArrayList]::new()
-        $emptyCount = 0
-        foreach ($dir in $filteredDirs) {
-            $response = Invoke-SafeWebRequest -Url $dir -TimeoutSec 10
-            if (-not $response) { continue }
-            $html = $response.Content
-            
-            $hasContent = $false
-            $dirs = Get-Dirs -Html $html -BaseUrl $dir -IsApache $isApache
-            $videos = Get-Videos -Html $html -BaseUrl $dir -IsApache $isApache
-            
-            if ($dirs.Count -gt 0 -or $videos.Count -gt 0) {
-                $hasContent = $true
-            }
-            
-            if ($hasContent) {
-                $null = $nonEmptyDirs.Add($dir)
-            }
-            else {
-                $emptyCount++
-            }
-        }
-        
-        if ($nonEmptyDirs.Count -eq 0) {
-            Write-Host "No non-empty directories found after filtering." -ForegroundColor Yellow
-            Start-Sleep -Seconds 1
-            continue
-        }
-        
-        # Optimize leaf directory finding with sorted array and prefix checking
-        $sortedDirs = $nonEmptyDirs | Sort-Object
+        # First, find leaf directories (optimization: only check these for emptiness)
+        $sortedDirs = $filteredDirs | Sort-Object
         $leafDirs = [System.Collections.ArrayList]::new()
         for ($i = 0; $i -lt $sortedDirs.Count; $i++) {
             $dir = $sortedDirs[$i]
@@ -138,6 +107,55 @@ function Invoke-LinkExplorer {
             Start-Sleep -Seconds 1
             continue
         }
+        
+        # Check only leaf directories for emptiness (performance optimization)
+        Write-Host "Checking $($leafDirs.Count) leaf directories for content..." -ForegroundColor Cyan
+        $nonEmptyLeafDirs = [System.Collections.ArrayList]::new()
+        $emptyCount = 0
+        $checkedCount = 0
+        foreach ($dir in $leafDirs) {
+            $checkedCount++
+            if ($checkedCount % 10 -eq 0) {
+                Write-Host "  Checked $checkedCount / $($leafDirs.Count)..." -ForegroundColor DarkGray
+            }
+            
+            $response = Invoke-SafeWebRequest -Url $dir -TimeoutSec 10
+            if (-not $response) { continue }
+            $html = $response.Content
+            
+            $dirs = Get-Dirs -Html $html -BaseUrl $dir -IsApache $isApache
+            $videos = Get-Videos -Html $html -BaseUrl $dir -IsApache $isApache
+            
+            if ($dirs.Count -gt 0 -or $videos.Count -gt 0) {
+                $null = $nonEmptyLeafDirs.Add($dir)
+            }
+            else {
+                $emptyCount++
+            }
+        }
+        
+        if ($nonEmptyLeafDirs.Count -eq 0) {
+            Write-Host "No non-empty directories found after filtering." -ForegroundColor Yellow
+            Start-Sleep -Seconds 1
+            continue
+        }
+        
+        # Build final list: all non-leaf dirs + non-empty leaf dirs
+        $finalDirs = [System.Collections.ArrayList]::new()
+        foreach ($dir in $sortedDirs) {
+            $isLeaf = $leafDirs -contains $dir
+            if (-not $isLeaf) {
+                # Non-leaf directory, keep it
+                $null = $finalDirs.Add($dir)
+            }
+            elseif ($nonEmptyLeafDirs -contains $dir) {
+                # Leaf directory with content, keep it
+                $null = $finalDirs.Add($dir)
+            }
+        }
+        
+        $sortedDirs = $finalDirs | Sort-Object
+        $leafDirs = $nonEmptyLeafDirs
         Write-Host "Total directories discovered: $($nonEmptyDirs.Count)" -ForegroundColor Green
         Write-Host "Leaf directories: $($leafDirs.Count)" -ForegroundColor Green
         if ($script:ExplorerSkippedBlocked -gt 0) { Write-Host "Blocked directories filtered: $script:ExplorerSkippedBlocked" -ForegroundColor Green }
