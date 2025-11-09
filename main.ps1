@@ -21,8 +21,8 @@ $DefaultConfig = @{
     DownloadPath     = "$PSScriptRoot\downloads"
     MaxCrawlDepth    = 9
     HistoryMaxSize   = 50
-    VideoExtensions  = @('.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.m4v')
-    DirBlockList     = @('lost found', 'software', 'games', 'e book', 'ebooks')
+    VideoExtensions  = @('.mp4', '.mkv', '.avi', '.mov', '.flv', '.webm', '.m4v', '.vob')
+    DirBlockList     = @('lost found', 'software', 'games', 'e book', 'ebooks', 'tutorial')
     Tools            = @{
         fzf    = ""
         aria2c = ""
@@ -458,16 +458,6 @@ function Invoke-IndexOperation {
     }
     Set-Urls -H5ai $H5aiSites -Apache $ApacheSites
     
-    # Count empty directories
-    Write-Host "Counting empty directories..." -ForegroundColor Cyan
-    $emptyDirCount = 0
-    foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
-        $entry = $CrawlMeta.dirs[$dirUrl]
-        if ($entry.ContainsKey('empty') -and $entry['empty']) {
-            $emptyDirCount++
-        }
-    }
-    
     # Display final stats
     $elapsed = $Stopwatch.Elapsed.ToString('hh\:mm\:ss')
     $completionMsg = switch ($Mode) {
@@ -490,7 +480,7 @@ function Invoke-IndexOperation {
         }
     }
     
-    Write-Host "  Empty directories: $emptyDirCount" -ForegroundColor Green
+    Write-Host "  Empty directories: $script:EmptyDirCount" -ForegroundColor Green
     if ($script:SkippedBlockedDirs -gt 0) {
         Write-Host "  Blocked directories skipped: $script:SkippedBlockedDirs" -ForegroundColor Green
     }
