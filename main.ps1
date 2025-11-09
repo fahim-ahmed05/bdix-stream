@@ -332,6 +332,7 @@ function Invoke-IndexOperation {
     # Track if anything changed across all sources
     $initialNewDirs = $script:NewDirs
     $initialNewFiles = $script:NewFiles
+    $initialIgnoredDirs = $script:IgnoredDirsSameTimestamp
     
     # Save initial progress if starting fresh
     if (-not $resuming) {
@@ -372,14 +373,21 @@ function Invoke-IndexOperation {
         
         Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true
         
+        # Calculate per-source deltas
+        $sourceDirs = $script:NewDirs - $initialNewDirs
+        $sourceFiles = $script:NewFiles - $initialNewFiles
+        $sourceUnchanged = $script:IgnoredDirsSameTimestamp - $initialIgnoredDirs
+        
         # Check if anything changed for this source
         $sourceHadChanges = ($script:NewDirs -gt $initialNewDirs) -or ($script:NewFiles -gt $initialNewFiles)
         
         if ($Mode -eq 'update') {
-            Write-Host "  Progress -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
+            Write-Host "  This source -> New dirs: $sourceDirs | New files: $sourceFiles | Unchanged dirs: $sourceUnchanged" -ForegroundColor DarkGray
+            Write-Host "  Total so far -> New dirs: $script:NewDirs | New files: $script:NewFiles | Unchanged dirs: $script:IgnoredDirsSameTimestamp" -ForegroundColor DarkGray
         }
         else {
-            Write-Host "  Stats so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
+            Write-Host "  This source -> New directories: $sourceDirs | New files: $sourceFiles" -ForegroundColor DarkGray
+            Write-Host "  Total so far -> New directories: $script:NewDirs | New files: $script:NewFiles" -ForegroundColor DarkGray
         }
         
         # Save crawler state after each source only if something changed (for resume capability)
@@ -397,6 +405,7 @@ function Invoke-IndexOperation {
         # Update baseline for next source
         $initialNewDirs = $script:NewDirs
         $initialNewFiles = $script:NewFiles
+        $initialIgnoredDirs = $script:IgnoredDirsSameTimestamp
         $resuming = $false
     }
     
