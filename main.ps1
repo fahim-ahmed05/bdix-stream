@@ -222,45 +222,28 @@ function Invoke-IndexOperation {
         Write-Host ""
         
         if (-not $quickUpdate) {
-            # Load crawler state once for analysis (will be reused later)
-            Write-Host "Loading existing crawler state..." -ForegroundColor Cyan
-            $CrawlMeta = Get-CrawlMeta
+            # Load issue-dirs.json for fast analysis (avoids loading full crawler-state)
+            Write-Host "Loading directory issues from previous index..." -ForegroundColor Cyan
+            $issueData = Read-JsonFile -Path $IssueDirsPath
+            if (-not $issueData) { $issueData = @() }
             
-            # Analyze existing state for missing timestamps and empty directories
-            Write-Host "Analyzing existing crawler state..." -ForegroundColor Cyan
-            $existingMissingDirs = [System.Collections.ArrayList]::new()
-            $existingEmptyDirs = [System.Collections.ArrayList]::new()
-            $filesPerMissingDir = @{}
-            
-            foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
-                $entry = $CrawlMeta.dirs[$dirUrl]
-                if (-not $entry.ContainsKey('last_modified')) {
-                    $null = $existingMissingDirs.Add($dirUrl)
-                    $filesPerMissingDir[$dirUrl] = 0
-                }
-                if ($entry.ContainsKey('empty') -and $entry['empty']) {
-                    $null = $existingEmptyDirs.Add($dirUrl)
-                }
-            }
+            # Separate issues by type
+            $existingMissingDirs = @($issueData | Where-Object { -not $_.timestamp })
+            $existingEmptyDirs = @($issueData | Where-Object { $_.files -eq 0 })
             
             $existingMissingFileCount = 0
-            if ($existingMissingDirs.Count -gt 0) {
-                # Sort by length descending for faster matching
-                $sortedMissingDirs = $existingMissingDirs | Sort-Object -Property Length -Descending
-                foreach ($fileUrl in $CrawlMeta.files.Keys) {
-                    foreach ($dirUrl in $sortedMissingDirs) {
-                        if ($fileUrl.StartsWith($dirUrl)) {
-                            $filesPerMissingDir[$dirUrl]++
-                            $existingMissingFileCount++
-                            break
-                        }
-                    }
-                }
+            $filesPerMissingDir = @{}
+            
+            # Build file count map from saved data
+            foreach ($item in $existingMissingDirs) {
+                $filesPerMissingDir[$item.url] = $item.files
+                $existingMissingFileCount += $item.files
             }
+            
             Write-Host ""
             
             if ($existingMissingDirs.Count -gt 0) {
-                Write-Host "Existing crawler state shows:" -ForegroundColor Yellow
+                Write-Host "Existing issues found:" -ForegroundColor Yellow
                 Write-Host "  Directories with missing timestamps: $($existingMissingDirs.Count)" -ForegroundColor Yellow
                 Write-Host "  Files under those directories: $existingMissingFileCount" -ForegroundColor Yellow
                 Write-Host ""
@@ -268,7 +251,7 @@ function Invoke-IndexOperation {
                 if ($existingMissingFileCount -gt 0) {
                     $reindexMissing = Read-YesNo -Message "Force reindex these directories with missing timestamps? (y/N)" -Default 'N'
                     if ($reindexMissing) {
-                        foreach ($u in $existingMissingDirs) { $forceSet[$u] = $true }
+                        foreach ($item in $existingMissingDirs) { $forceSet[$item.url] = $true }
                     }
                 }
                 else {
@@ -276,18 +259,23 @@ function Invoke-IndexOperation {
                 }
             }
             else {
-                Write-Host "No directories with missing timestamps found in existing state." -ForegroundColor Green
+                Write-Host "No directories with missing timestamps found." -ForegroundColor Green
             }
             Write-Host ""
             
             if ($existingEmptyDirs.Count -gt 0) {
-                Write-Host "Existing crawler state shows:" -ForegroundColor Yellow
-                Write-Host "  Empty directories: $($existingEmptyDirs.Count)" -ForegroundColor Yellow
+                Write-Host "Empty directories from last index: $($existingEmptyDirs.Count)" -ForegroundColor Yellow
                 Write-Host ""
                 $checkEmpty = Read-YesNo -Message "Check if empty directories now have content? (y/N)" -Default 'N'
                 if ($checkEmpty) {
-                    foreach ($u in $existingEmptyDirs) { $forceSet[$u] = $true }
+                    foreach ($item in $existingEmptyDirs) { $forceSet[$item.url] = $true }
                 }
+            }
+            
+            # Only load crawler-state if user chose to reindex issues
+            if ($forceSet.Count -gt 0) {
+                Write-Host "Loading existing crawler state..." -ForegroundColor Cyan
+                $CrawlMeta = Get-CrawlMeta
             }
         }
         else {
@@ -418,6 +406,12 @@ function Invoke-IndexOperation {
     # Only do detailed logging if something changed
     $totalChanges = $script:NewDirs + $script:NewFiles
     if ($totalChanges -gt 0) {
+        # Write issue directories file (updated state)
+        $issueCount = Write-IssueDirs -CrawlMeta $CrawlMeta
+        if ($issueCount -gt 0) {
+            Write-Host "Tracked $issueCount problematic directories in: $IssueDirsPath" -ForegroundColor Yellow
+        }
+        
         # Log missing timestamps and blocked dirs
         $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
         if ($missingCount -gt 0) {

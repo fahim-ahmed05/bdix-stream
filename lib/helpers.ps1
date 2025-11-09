@@ -18,6 +18,7 @@ $SettingsPath = Join-Path $DataDir 'settings.json'
 $SourceUrlsPath = Join-Path $DataDir 'source-urls.json'
 $WatchHistoryPath = Join-Path $DataDir 'watch-history.json'
 $CrawlerStatePath = Join-Path $DataDir 'crawler-state.json'
+$IssueDirsPath = Join-Path $DataDir 'issue-dirs.json'
 $IndexProgressPath = Join-Path $DataDir 'index-progress.json'
 $MissingTimestampsLogPath = Join-Path $DataDir 'timestamp-missing.log'
 $BackupRoot = Join-Path $DataDir 'backups'
@@ -141,6 +142,66 @@ function Write-MissingTimestampLog {
     }
     
     return (Write-AppLog -Path $LogPath -HeaderPrefix 'Missing last_modified directories (URL<TAB>FileCount)' -Entries $lines)
+}
+
+function Write-IssueDirs {
+    param([hashtable]$CrawlMeta)
+    
+    # Collect problematic directories: missing timestamp OR empty
+    $issues = [System.Collections.ArrayList]::new()
+    $fileCountMap = @{}
+    
+    # First pass: identify problematic directories
+    $problematicDirs = [System.Collections.ArrayList]::new()
+    foreach ($dirUrl in $CrawlMeta.dirs.Keys) {
+        $entry = $CrawlMeta.dirs[$dirUrl]
+        $hasTimestamp = $entry.ContainsKey('last_modified')
+        $isEmpty = $entry.ContainsKey('empty') -and $entry['empty']
+        
+        if (-not $hasTimestamp -or $isEmpty) {
+            $null = $problematicDirs.Add($dirUrl)
+            $fileCountMap[$dirUrl] = 0
+        }
+    }
+    
+    if ($problematicDirs.Count -eq 0) {
+        # No issues - write empty array
+        @() | ConvertTo-Json -Compress | Set-Content $IssueDirsPath -Encoding UTF8
+        return 0
+    }
+    
+    # Sort by length descending for efficient file counting
+    $sortedDirs = $problematicDirs | Sort-Object -Property Length -Descending
+    
+    # Count files under each problematic directory
+    foreach ($fileUrl in $CrawlMeta.files.Keys) {
+        foreach ($dirUrl in $sortedDirs) {
+            if ($fileUrl.StartsWith($dirUrl)) {
+                $fileCountMap[$dirUrl]++
+                break
+            }
+        }
+    }
+    
+    # Build issue objects
+    foreach ($dirUrl in $problematicDirs) {
+        $entry = $CrawlMeta.dirs[$dirUrl]
+        $obj = [PSCustomObject]@{
+            url = $dirUrl
+            files = $fileCountMap[$dirUrl]
+        }
+        
+        # Add timestamp if it exists
+        if ($entry.ContainsKey('last_modified')) {
+            $obj | Add-Member -NotePropertyName 'timestamp' -NotePropertyValue $entry['last_modified']
+        }
+        
+        $null = $issues.Add($obj)
+    }
+    
+    # Write to file
+    $issues | ConvertTo-Json -Depth 3 -Compress | Set-Content $IssueDirsPath -Encoding UTF8
+    return $issues.Count
 }
 
 function Resolve-Tool {
