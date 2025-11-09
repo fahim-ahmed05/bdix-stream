@@ -607,6 +607,13 @@ function Remove-InvalidIndexEntries {
     if ($deadCount -gt 0) {
         Write-Host "Saving updated crawler state..." -ForegroundColor Cyan
         Set-CrawlMeta -Meta $newCrawlMeta
+        
+        # Update issue directories file to reflect removed entries
+        Write-Host "Updating issue directories..." -ForegroundColor Cyan
+        $issueCount = Write-IssueDirs -CrawlMeta $newCrawlMeta
+        if ($issueCount -gt 0) {
+            Write-Host "Updated issue tracking: $issueCount problematic directories remain" -ForegroundColor Yellow
+        }
 
         $removedSoFar = 0
         foreach ($entry in $deadUrls) {
