@@ -41,12 +41,11 @@ function Invoke-LinkExplorer {
         $type = Read-Host "Server type? (1) h5ai / (2) Apache [default: h5ai]"
         $isApache = ($type -eq '2')
         $parser = if ($isApache) { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $true } } else { { param($Html, $BaseUrl) Get-Dirs -Html $Html -BaseUrl $BaseUrl -IsApache $false } }
-        $maxDepth = [Math]::Min($script:Config.MaxCrawlDepth, 9)
         do {
-            $depthInput = Read-Host "Crawl depth (1-$maxDepth) [default: 2]"
+            $depthInput = Read-Host "Crawl depth (1 or higher) [default: 2]"
             if ([string]::IsNullOrWhiteSpace($depthInput)) { $depthInput = "2" }
             $depth = if ([int]::TryParse($depthInput, [ref]$null)) { [int]$depthInput } else { -1 }
-        } while ($depth -lt 1 -or $depth -gt $maxDepth)
+        } while ($depth -lt 1)
         $script:ExplorerSkippedBlocked = 0
         Write-Host "Exploring base URL: $url" -ForegroundColor Yellow
         Write-Host "Depth: $depth" -ForegroundColor Yellow
