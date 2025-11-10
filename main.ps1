@@ -303,7 +303,9 @@ function Invoke-IndexOperation {
     }
     
     # Load or create crawler state
-    $loadExisting = ($Mode -eq 'update') -or ($isIncremental) -or ($onlyNew)
+    # For selective mode, always load existing state (even for full reindex of selected sources)
+    # For build mode, only load if incremental or onlyNew
+    $loadExisting = ($Mode -eq 'selective') -or ($Mode -eq 'update') -or ($isIncremental) -or ($onlyNew)
     if ($loadExisting) {
         # Skip loading if already loaded during update analysis
         if (-not $CrawlMeta) {
