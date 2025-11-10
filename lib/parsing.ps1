@@ -1,9 +1,17 @@
+# Compiled regex patterns for performance (compiled once, reused many times)
+$script:RegexIsoDate = [regex]::new('^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})(?::(\d{2}))?$', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+$script:RegexApacheDate = [regex]::new('^(\d{2})-([A-Za-z]{3})-(\d{4})\s+(\d{2}:\d{2})(?::(\d{2}))?$', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+$script:RegexDateToken = [regex]::new('(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)|(\d{2}-[A-Za-z]{3}-\d{4}\s+\d{2}:\d{2}(?::\d{2})?)', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+$script:RegexTableRow = [regex]::new('(?s)<tr[^>]*>.*?</tr>', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+$script:RegexApacheLink = [regex]::new('<a\s+href="([^"]+)">([^<]+)</a>', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+$script:RegexH5aiLink = [regex]::new('<a\s+href="([^"]+)"[^>]*>([^<]+)</a>', [System.Text.RegularExpressions.RegexOptions]::Compiled)
+
 function Convert-DateString {
     param([string]$Raw)
     if (-not $Raw) { return $null }
     $rawTrim = $Raw.Trim()
     # ISO-like format: YYYY-MM-DD HH:MM or YYYY-MM-DD HH:MM:SS
-    $isoMatch = [regex]::Match($rawTrim, '^(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})(?::(\d{2}))?$')
+    $isoMatch = $script:RegexIsoDate.Match($rawTrim)
     if ($isoMatch.Success) {
         $datePart = $isoMatch.Groups[1].Value
         $timePart = $isoMatch.Groups[2].Value
@@ -11,7 +19,7 @@ function Convert-DateString {
         return "$datePart $($timePart):$($secPart)"
     }
     # Apache format: DD-MMM-YYYY HH:MM or DD-MMM-YYYY HH:MM:SS
-    $apacheMatch = [regex]::Match($rawTrim, '^(\d{2})-([A-Za-z]{3})-(\d{4})\s+(\d{2}:\d{2})(?::(\d{2}))?$')
+    $apacheMatch = $script:RegexApacheDate.Match($rawTrim)
     if ($apacheMatch.Success) {
         $day = $apacheMatch.Groups[1].Value
         $monAbbr = $apacheMatch.Groups[2].Value.ToLower()
@@ -27,7 +35,7 @@ function Convert-DateString {
 function Get-LastModifiedFromRow {
     param([string]$RowHtml)
     if (-not $RowHtml) { return $null }
-    $dateTokenMatch = [regex]::Match($RowHtml, '(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}(?::\d{2})?)|(\d{2}-[A-Za-z]{3}-\d{4}\s+\d{2}:\d{2}(?::\d{2})?)')
+    $dateTokenMatch = $script:RegexDateToken.Match($RowHtml)
     if ($dateTokenMatch.Success) { return (Convert-DateString -Raw $dateTokenMatch.Value) }
     return $null
 }
@@ -58,20 +66,22 @@ function Get-ParsedRows {
     $results = [System.Collections.ArrayList]::new()
     $videoExtensions = $script:Config.VideoExtensions
     
-    [regex]::Matches($Html, '(?s)<tr[^>]*>.*?</tr>') | ForEach-Object {
+    $script:RegexTableRow.Matches($Html) | ForEach-Object {
         $row = $_.Value
         if ($row -match '<th>' -or $row -like '*Parent Directory*') { return }
         
-        # Extract href and name
+        # Extract href and name using compiled regex
         if ($IsApache) {
-            if ($row -notmatch '<a\s+href="([^"]+)">([^<]+)</a>') { return }
-            $href = $matches[1]
-            $name = $matches[2].Trim()
+            $linkMatch = $script:RegexApacheLink.Match($row)
+            if (-not $linkMatch.Success) { return }
+            $href = $linkMatch.Groups[1].Value
+            $name = $linkMatch.Groups[2].Value.Trim()
         }
         else {
-            if ($row -notmatch '<a\s+href="([^"]+)"[^>]*>([^<]+)</a>') { return }
-            $href = $matches[1]
-            $name = [System.Web.HttpUtility]::UrlDecode([System.Web.HttpUtility]::HtmlDecode($matches[2].Trim()))
+            $linkMatch = $script:RegexH5aiLink.Match($row)
+            if (-not $linkMatch.Success) { return }
+            $href = $linkMatch.Groups[1].Value
+            $name = [System.Web.HttpUtility]::UrlDecode([System.Web.HttpUtility]::HtmlDecode($linkMatch.Groups[2].Value.Trim()))
         }
         
         # Filter by item type

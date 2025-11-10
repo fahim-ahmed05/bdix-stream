@@ -6,7 +6,8 @@ function Invoke-IndexCrawl {
         [hashtable]$Visited,
         [hashtable]$CrawlMetaRef,
         [hashtable]$ForceReindexSet,
-        [bool]$TrackStats = $false
+        [bool]$TrackStats = $false,
+        [string]$CookieData = ""
     )
     if ($Depth -lt 0 -or $Visited[$Url]) { return }
     $Visited[$Url] = $true
@@ -20,7 +21,7 @@ function Invoke-IndexCrawl {
     if (Test-IsBlockedUrl -Url $Url -BlockSet $global:DirBlockSet) { if ($TrackStats) { $script:SkippedBlockedDirs++ ; $script:BlockedDirUrls += $Url } ; return }
     
     $timeoutSec = if ($script:Config.RequestTimeoutSec) { $script:Config.RequestTimeoutSec } else { 12 }
-    $response = Invoke-SafeWebRequest -Url $Url -TimeoutSec $timeoutSec
+    $response = Invoke-SafeWebRequest -Url $Url -TimeoutSec $timeoutSec -CookieData $CookieData
     if (-not $response) { return }
     $html = $response.Content
     
@@ -101,7 +102,7 @@ function Invoke-IndexCrawl {
             if (-not $dir.LastModified -and -not $script:MissingDateDirs.ContainsKey($dirUrl)) {
                 $script:MissingDateDirs[$dirUrl] = 0
             }
-            Invoke-IndexCrawl -Url $dirUrl -Depth ($Depth - 1) -IsApache $IsApache -Visited $Visited -CrawlMetaRef $CrawlMetaRef -ForceReindexSet $ForceReindexSet -TrackStats $TrackStats
+            Invoke-IndexCrawl -Url $dirUrl -Depth ($Depth - 1) -IsApache $IsApache -Visited $Visited -CrawlMetaRef $CrawlMetaRef -ForceReindexSet $ForceReindexSet -TrackStats $TrackStats -CookieData $CookieData
         }
     }
     elseif ($TrackStats) { $script:IgnoredDirsSameTimestamp++ }

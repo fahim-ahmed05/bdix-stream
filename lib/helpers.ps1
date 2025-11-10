@@ -5,10 +5,22 @@ function Add-TrailingSlash {
     return "$Url/"
 }
 
+# ASCII Art Banner
+$script:AsciiArt = @'
+                                                                               
+██████╗ ██████╗ ██╗██╗  ██╗███████╗████████╗██████╗ ███████╗ █████╗ ███╗   ███╗
+██╔══██╗██╔══██╗██║╚██╗██╔╝██╔════╝╚══██╔══╝██╔══██╗██╔════╝██╔══██╗████╗ ████║
+██████╔╝██║  ██║██║ ╚███╔╝ ███████╗   ██║   ██████╔╝█████╗  ███████║██╔████╔██║
+██╔══██╗██║  ██║██║ ██╔██╗ ╚════██║   ██║   ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║
+██████╔╝██████╔╝██║██╔╝ ██╗███████║   ██║   ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║
+╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝
+                                                                               
+'@
+
 function Show-Header {
     param([Parameter(Mandatory = $true)][string]$Title)
     Clear-Host
-    Write-Host $AsciiArt -ForegroundColor Cyan
+    Write-Host $script:AsciiArt -ForegroundColor Cyan
     Write-Host "=== $Title ===" -ForegroundColor Cyan
     Write-Host ""
 }
@@ -271,7 +283,10 @@ function Backup-Files {
 function ConvertTo-SiteList {
     param($List)
     if (-not $List) { return @() }
-    if ($List.PSObject.Properties.Name -contains 'url') {
+    
+    # Handle both Hashtables and PSCustomObjects from JSON
+    $isHashtable = $List -is [Hashtable]
+    if (-not $isHashtable -and ($List.PSObject.Properties.Name -contains 'url')) {
         $List = @($List)
     }
     
@@ -279,15 +294,35 @@ function ConvertTo-SiteList {
     $dedup = [System.Collections.ArrayList]::new()
     
     foreach ($item in $List) {
-        if (-not ($item.PSObject.Properties.Name -contains 'url')) { continue }
-        $u = [string]$item.url
+        # Extract url (handle both Hashtable and PSCustomObject)
+        $u = if ($item -is [Hashtable]) { [string]$item['url'] } else { [string]$item.url }
         if (-not $u) { continue }
         $u = Add-TrailingSlash $u
         
         if (-not $seen.ContainsKey($u)) {
             $seen[$u] = $true
-            $idx = if ($item.PSObject.Properties.Name -contains 'indexed') { [bool]$item.indexed } else { $false }
-            $null = $dedup.Add([PSCustomObject]@{ url = $u; indexed = $idx })
+            
+            # Extract indexed flag (handle both types)
+            $idx = $false
+            if ($item -is [Hashtable]) {
+                if ($item.ContainsKey('indexed')) { $idx = [bool]$item['indexed'] }
+            }
+            elseif ($item.PSObject.Properties.Name -contains 'indexed') {
+                $idx = [bool]$item.indexed
+            }
+            
+            # Create Hashtable (faster and more consistent than PSCustomObject)
+            $siteObj = @{ url = $u; indexed = $idx }
+            
+            # Preserve cookies field if present (handle both types)
+            if ($item -is [Hashtable]) {
+                if ($item.ContainsKey('cookies')) { $siteObj['cookies'] = $item['cookies'] }
+            }
+            elseif ($item.PSObject.Properties.Name -contains 'cookies') {
+                $siteObj['cookies'] = $item.cookies
+            }
+            
+            $null = $dedup.Add($siteObj)
         }
     }
     
@@ -403,7 +438,8 @@ function Invoke-SafeWebRequest {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Url,
-        [int]$TimeoutSec = 12
+        [int]$TimeoutSec = 12,
+        [string]$CookieData = ""
     )
     try {
         # Use curl for faster HTTP requests (3-5x faster than Invoke-WebRequest)
@@ -416,9 +452,24 @@ function Invoke-SafeWebRequest {
             '--location',         # Follow redirects
             '--max-time', $TimeoutSec,
             '--compressed',       # Accept compressed responses
-            '--max-redirs', '5',  # Limit redirects
-            $Url
+            '--max-redirs', '5'  # Limit redirects
         )
+        
+        # Add cookie if provided (can be path to file or inline cookie string)
+        if ($CookieData) {
+            if (Test-Path $CookieData) {
+                # If it's a file path, use --cookie flag
+                $curlArgs += '--cookie'
+                $curlArgs += $CookieData
+            }
+            else {
+                # If it's inline cookie string, use --cookie flag
+                $curlArgs += '--cookie'
+                $curlArgs += $CookieData
+            }
+        }
+        
+        $curlArgs += $Url
         
         $content = & $curlExe @curlArgs 2>$null
         
@@ -533,16 +584,18 @@ function Get-AllSourcesList {
     $allSources = [System.Collections.ArrayList]::new()
     
     foreach ($s in $H5aiSites) {
-        $url = if ($NormalizeUrls) { Add-TrailingSlash $s.url } else { $s.url }
-        $obj = [PSCustomObject]@{ url = $url; type = 'h5ai' }
-        if ($IncludeIndexed) { $obj | Add-Member -NotePropertyName 'indexed' -NotePropertyValue $s.indexed }
+        $url = if ($NormalizeUrls) { Add-TrailingSlash $s['url'] } else { $s['url'] }
+        $obj = @{ url = $url; type = 'h5ai' }
+        if ($IncludeIndexed) { $obj['indexed'] = $s['indexed'] }
+        if ($s.ContainsKey('cookies')) { $obj['cookies'] = $s['cookies'] }
         $null = $allSources.Add($obj)
     }
     
     foreach ($s in $ApacheSites) {
-        $url = if ($NormalizeUrls) { Add-TrailingSlash $s.url } else { $s.url }
-        $obj = [PSCustomObject]@{ url = $url; type = 'apache' }
-        if ($IncludeIndexed) { $obj | Add-Member -NotePropertyName 'indexed' -NotePropertyValue $s.indexed }
+        $url = if ($NormalizeUrls) { Add-TrailingSlash $s['url'] } else { $s['url'] }
+        $obj = @{ url = $url; type = 'apache' }
+        if ($IncludeIndexed) { $obj['indexed'] = $s['indexed'] }
+        if ($s.ContainsKey('cookies')) { $obj['cookies'] = $s['cookies'] }
         $null = $allSources.Add($obj)
     }
     

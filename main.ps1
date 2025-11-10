@@ -4,17 +4,6 @@
 . "$PSScriptRoot\lib\crawl.ps1"
 . "$PSScriptRoot\lib\ui.ps1"
 
-$AsciiArt = @'
-                                                                               
-██████╗ ██████╗ ██╗██╗  ██╗███████╗████████╗██████╗ ███████╗ █████╗ ███╗   ███╗
-██╔══██╗██╔══██╗██║╚██╗██╔╝██╔════╝╚══██╔══╝██╔══██╗██╔════╝██╔══██╗████╗ ████║
-██████╔╝██║  ██║██║ ╚███╔╝ ███████╗   ██║   ██████╔╝█████╗  ███████║██╔████╔██║
-██╔══██╗██║  ██║██║ ██╔██╗ ╚════██║   ██║   ██╔══██╗██╔══╝  ██╔══██║██║╚██╔╝██║
-██████╔╝██████╔╝██║██╔╝ ██╗███████║   ██║   ██║  ██║███████╗██║  ██║██║ ╚═╝ ██║
-╚═════╝ ╚═════╝ ╚═╝╚═╝  ╚═╝╚══════╝   ╚═╝   ╚═╝  ╚═╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝
-                                                                               
-'@
-
 $DefaultConfig = @{
     MediaPlayer       = "mpv"
     MediaPlayerFlags  = @('--save-position-on-quit', '--watch-later-options=start,volume,mute', "--script=$PSScriptRoot\mpv\bdix-history.lua", "--fullscreen")
@@ -152,14 +141,21 @@ function Invoke-IndexOperation {
         $lines = $selected -split "`n" | Where-Object { $_ }
         if ($lines.Count -eq 0) { return }
         
+        # Build a hashtable for fast URL lookup from original sources
+        $sourcesByUrl = @{}
+        foreach ($src in $allSources) {
+            $sourcesByUrl[$src['url']] = $src
+        }
+        
+        # Match selected URLs back to original source objects (preserves cookies and all properties)
         $selectedSources = [System.Collections.ArrayList]::new()
         foreach ($line in $lines) {
             $parts = $line -split "`t", 3
-            if ($parts.Count -ge 2) {
-                $null = $selectedSources.Add([PSCustomObject]@{
-                        url  = $parts[0]
-                        type = $parts[1]
-                    })
+            if ($parts.Count -ge 1) {
+                $url = $parts[0]
+                if ($sourcesByUrl.ContainsKey($url)) {
+                    $null = $selectedSources.Add($sourcesByUrl[$url])
+                }
             }
         }
         
@@ -377,7 +373,10 @@ function Invoke-IndexOperation {
             foreach ($k in $keysToRemove) { $CrawlMeta.files.Remove($k) }
         }
         
-        Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true
+        # Get cookie data for this source if provided
+        $cookieData = if ($src.ContainsKey('cookies')) { $src['cookies'] } else { "" }
+        
+        Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true -CookieData $cookieData
         
         # Calculate per-source deltas
         $sourceDirs = $script:NewDirs - $initialNewDirs
