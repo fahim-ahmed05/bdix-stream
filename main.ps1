@@ -12,7 +12,7 @@ $DefaultConfig = @{
     RequestTimeoutSec = 8
     HistoryMaxSize    = 50
     VideoExtensions   = @('.mp4', '.mkv', '.avi')
-    DirBlockList      = @('lost found', 'software', 'games', 'e book', 'ebooks', 'tutorial')
+    DirBlockList      = @('lost found', 'software', 'games', 'e book', 'ebooks', 'tutorial', 'e-books')
     Tools             = @{
         fzf    = ""
         aria2c = ""
@@ -191,10 +191,14 @@ function Invoke-IndexOperation {
         # Convert to common format using ArrayList for better performance
         $sourcesToProcess = [System.Collections.ArrayList]::new()
         foreach ($s in $h5aiToProcess) {
-            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'h5ai'; originalSite = $s })
+            $obj = @{ url = $s['url']; type = 'h5ai'; originalSite = $s }
+            if ($s.ContainsKey('cookies')) { $obj['cookies'] = $s['cookies'] }
+            $null = $sourcesToProcess.Add($obj)
         }
         foreach ($s in $apacheToProcess) {
-            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'apache'; originalSite = $s })
+            $obj = @{ url = $s['url']; type = 'apache'; originalSite = $s }
+            if ($s.ContainsKey('cookies')) { $obj['cookies'] = $s['cookies'] }
+            $null = $sourcesToProcess.Add($obj)
         }
         
     }
@@ -204,10 +208,14 @@ function Invoke-IndexOperation {
         
         $sourcesToProcess = [System.Collections.ArrayList]::new()
         foreach ($s in $H5aiSites) {
-            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'h5ai' })
+            $obj = @{ url = $s['url']; type = 'h5ai' }
+            if ($s.ContainsKey('cookies')) { $obj['cookies'] = $s['cookies'] }
+            $null = $sourcesToProcess.Add($obj)
         }
         foreach ($s in $ApacheSites) {
-            $null = $sourcesToProcess.Add([PSCustomObject]@{ url = $s.url; type = 'apache' })
+            $obj = @{ url = $s['url']; type = 'apache' }
+            if ($s.ContainsKey('cookies')) { $obj['cookies'] = $s['cookies'] }
+            $null = $sourcesToProcess.Add($obj)
         }
         
         if ($sourcesToProcess.Count -eq 0) {
