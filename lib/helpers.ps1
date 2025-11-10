@@ -777,3 +777,44 @@ function Test-IndexProgressValid {
     
     return $true
 }
+
+function Test-CookieAuthentication {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+        [Parameter(Mandatory = $true)]
+        [string]$CookieData
+    )
+    
+    Write-Host "  Validating authentication cookies..." -ForegroundColor DarkGray
+    
+    $response = Invoke-SafeWebRequest -Url $Url -CookieData $CookieData -TimeoutSec 10
+    if (-not $response) {
+        Write-Host "  ✗ Failed to connect to $Url" -ForegroundColor Red
+        return $false
+    }
+    
+    # Check if we got valid HTML content (not a login redirect or error page)
+    $content = $response.Content
+    if ($content.Length -lt 500) {
+        Write-Host "  ✗ Response too small (likely authentication failed)" -ForegroundColor Red
+        return $false
+    }
+    
+    # Check if we got a proper directory listing (h5ai or Apache)
+    $hasDirectoryListing = ($content -like '*<table*') -or ($content -like '*<tbody*') -or ($content -like '*Index of*')
+    if (-not $hasDirectoryListing) {
+        Write-Host "  ✗ No directory listing found (authentication may have failed)" -ForegroundColor Red
+        return $false
+    }
+    
+    # More specific check: look for actual login forms (not just the word "login")
+    $hasLoginForm = ($content -match '<form[^>]*login') -or ($content -match 'type=[''"]password[''"]') -or ($content -match 'action=[''"][^''"]*login')
+    if ($hasLoginForm) {
+        Write-Host "  ✗ Login form detected (authentication failed)" -ForegroundColor Red
+        return $false
+    }
+    
+    Write-Host "  ✓ Cookies are valid" -ForegroundColor Green
+    return $true
+}

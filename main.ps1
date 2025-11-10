@@ -386,7 +386,35 @@ function Invoke-IndexOperation {
         # Get cookie data for this source if provided
         $cookieData = if ($src.ContainsKey('cookies')) { $src['cookies'] } else { "" }
         
-        Invoke-IndexCrawl -Url $src.url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true -CookieData $cookieData
+        # Validate cookies before crawling (if cookies are required)
+        if ($cookieData) {
+            $cookiesValid = Test-CookieAuthentication -Url $src['url'] -CookieData $cookieData
+            if (-not $cookiesValid) {
+                Write-Host ""
+                Write-Host "Cookie authentication failed for: $($src['url'])" -ForegroundColor Red
+                Write-Host "Please update cookies in $SourceUrlsPath and press Enter to retry, or Ctrl+C to abort." -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "Tip: You can use a cookie file path instead of inline cookies:" -ForegroundColor Cyan
+                Write-Host '  "cookies": "C:\\path\\to\\cookies.txt"' -ForegroundColor DarkGray
+                Write-Host ""
+                Read-Host "Press Enter after updating cookies"
+                
+                # Reload source URLs to get updated cookies
+                Initialize-SourceUrls
+                $allSources = Get-AllSourcesList -IncludeIndexed
+                $updatedSrc = $allSources | Where-Object { $_['url'] -eq $src['url'] }
+                if ($updatedSrc -and $updatedSrc.ContainsKey('cookies')) {
+                    $cookieData = $updatedSrc['cookies']
+                    Write-Host "Retrying with updated cookies..." -ForegroundColor Cyan
+                }
+                else {
+                    Write-Host "No cookies found after reload. Skipping this source." -ForegroundColor Yellow
+                    continue
+                }
+            }
+        }
+        
+        Invoke-IndexCrawl -Url $src['url'] -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true -CookieData $cookieData
         
         # Calculate per-source deltas
         $sourceDirs = $script:NewDirs - $initialNewDirs
