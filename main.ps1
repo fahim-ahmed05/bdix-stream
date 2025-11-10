@@ -17,7 +17,7 @@ $AsciiArt = @'
 
 $DefaultConfig = @{
     MediaPlayer       = "mpv"
-    MediaPlayerFlags  = @('--save-position-on-quit', '--watch-later-options=start,volume,mute', "--script=$PSScriptRoot\mpv\bdix-history.lua")
+    MediaPlayerFlags  = @('--save-position-on-quit', '--watch-later-options=start,volume,mute', "--script=$PSScriptRoot\mpv\bdix-history.lua", "--fullscreen")
     DownloadPath      = "$PSScriptRoot\downloads"
     MaxCrawlDepth     = 9
     RequestTimeoutSec = 8
