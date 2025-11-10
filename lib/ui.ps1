@@ -472,7 +472,68 @@ function Invoke-SearchInteraction {
     $parts = $selected -split "`t", 2
     if ($parts.Count -lt 2) { return }
     $url = $parts[1]; $name = if ($parts[0] -ne "-") { $parts[0] } else { [System.IO.Path]::GetFileName($url) }
-    if ($Mode -eq "Stream") { Write-Host "Streaming: $name" -ForegroundColor Green; Add-HistoryEntry -Name $name -Url $url; $playerArgs = @($script:Config.MediaPlayerFlags) + @($url); & $script:Config.MediaPlayer $playerArgs; $nextQuery = if ($script:LastStreamQuery) { $script:LastStreamQuery } else { $name }; Invoke-SearchInteraction -Mode Stream -InitialQuery $nextQuery }
+    if ($Mode -eq "Stream") {
+        Write-Host "Streaming: $name" -ForegroundColor Green
+        Add-HistoryEntry -Name $name -Url $url
+
+        # If this looks like a TV episode (SxxExx) try to build a playlist from sibling files
+        $playerUrls = @($url)
+        $epMatch = [regex]::Match($name, '(?i)S(?<season>\d{1,2})E(?<ep>\d{1,3})')
+        if ($epMatch.Success -and $script:jqPath) {
+            try {
+                # Directory prefix (keep trailing slash)
+                $dirPrefix = ($url -replace '/[^/]*$','/')
+
+                $jqQuery = '.files | to_entries | .[] | "\(.value)\t\(.key)"'
+                $allLines = Get-Content $CrawlerStatePath -Raw | & $script:jqPath -r $jqQuery
+
+                $candidates = @()
+                foreach ($line in ($allLines -split "`n" | Where-Object { $_ })) {
+                    $parts = $line -split "`t", 2
+                    if ($parts.Count -lt 2) { continue }
+                    $candidateName = $parts[0]
+                    $candidateUrl = $parts[1]
+                    if (-not $candidateUrl.StartsWith($dirPrefix)) { continue }
+                    $m = [regex]::Match($candidateName, '(?i)S(?<season>\d{1,2})E(?<ep>\d{1,3})')
+                    if ($m.Success -and ($m.Groups['season'].Value -eq $epMatch.Groups['season'].Value)) {
+                        $epNum = [int]$m.Groups['ep'].Value
+                        $candidates += [pscustomobject]@{ Url = $candidateUrl; Name = $candidateName; Ep = $epNum }
+                    }
+                }
+
+                if ($candidates.Count -gt 1) {
+                    $sorted = $candidates | Sort-Object Ep
+                    # Build a sorted playlist (ascending episodes)
+                    $playerUrls = $sorted | ForEach-Object { $_.Url }
+                    # For players that support starting at an index (mpv), we'll pass the index.
+                    # For other players, fall back to moving the selected item to the front.
+                }
+            }
+            catch {
+                # If anything fails, fall back to playing the single URL
+                $playerUrls = @($url)
+            }
+        }
+
+        # If using mpv, pass --playlist-start=<index> so mpv plays the full sorted list and starts at the selected episode
+        if ($playerUrls.Count -gt 1 -and ($script:Config.MediaPlayer -match '(?i)mpv')) {
+            $startIndex = [array]::IndexOf($playerUrls, $url)
+            if ($startIndex -lt 0) { $startIndex = 0 }
+            $playlistArg = "--playlist-start=$startIndex"
+            $playerArgs = @($script:Config.MediaPlayerFlags) + @($playlistArg) + $playerUrls
+        }
+        else {
+            # Fallback: move current item to front
+            $playerUrls = ($playerUrls | Where-Object { $_ -ne $url })
+            $playerUrls = ,$url + $playerUrls
+            $playerArgs = @($script:Config.MediaPlayerFlags) + $playerUrls
+        }
+
+        & $script:Config.MediaPlayer $playerArgs
+
+        $nextQuery = if ($script:LastStreamQuery) { $script:LastStreamQuery } else { $name }
+        Invoke-SearchInteraction -Mode Stream -InitialQuery $nextQuery
+    }
     else {
         Write-Host "Selected for download: $name" -ForegroundColor Green
         Invoke-Download -Url $url -Name $name
