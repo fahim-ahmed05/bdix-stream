@@ -418,6 +418,8 @@ function Add-HistoryEntry {
 
 function Show-WatchHistory {
     Show-Header "Watch History"
+    # Import any pending mpv events (if mpv wrote to the temp log)
+    $null = Import-MpvEventLog
     $history = Read-JsonFile -Path $WatchHistoryPath
     if (!$history -or $history.Count -eq 0) { Write-Host "History is empty." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     $displayLines = foreach ($item in $history) { "$( $item.Name )`t$( $item.Url )" }
@@ -430,7 +432,19 @@ function Show-WatchHistory {
     $url = $parts[1]; $name = $parts[0]
     Write-Host "Playing from history: $name" -ForegroundColor Green
     Add-HistoryEntry -Name $name -Url $url
-    $playerArgs = @($script:Config.MediaPlayerFlags) + @($url)
+    # Try to build episode playlist; falls back to single URL
+    $pl = Get-EpisodePlaylistFromUrl -Url $url -Name $name
+    $playerUrls = $pl.Urls
+    $startIndex = $pl.StartIndex
+    if ($playerUrls.Count -gt 1 -and ($script:Config.MediaPlayer -match '(?i)mpv')) {
+        $playlistArg = "--playlist-start=$startIndex"
+        $playerArgs = @($script:Config.MediaPlayerFlags) + @($playlistArg) + $playerUrls
+    }
+    else {
+        $playerUrls = ($playerUrls | Where-Object { $_ -ne $url })
+        $playerUrls = ,$url + $playerUrls
+        $playerArgs = @($script:Config.MediaPlayerFlags) + $playerUrls
+    }
     & $script:Config.MediaPlayer $playerArgs
 }
 
@@ -476,49 +490,13 @@ function Invoke-SearchInteraction {
         Write-Host "Streaming: $name" -ForegroundColor Green
         Add-HistoryEntry -Name $name -Url $url
 
-        # If this looks like a TV episode (SxxExx) try to build a playlist from sibling files
-        $playerUrls = @($url)
-        $epMatch = [regex]::Match($name, '(?i)S(?<season>\d{1,2})E(?<ep>\d{1,3})')
-        if ($epMatch.Success -and $script:jqPath) {
-            try {
-                # Directory prefix (keep trailing slash)
-                $dirPrefix = ($url -replace '/[^/]*$','/')
-
-                $jqQuery = '.files | to_entries | .[] | "\(.value)\t\(.key)"'
-                $allLines = Get-Content $CrawlerStatePath -Raw | & $script:jqPath -r $jqQuery
-
-                $candidates = @()
-                foreach ($line in ($allLines -split "`n" | Where-Object { $_ })) {
-                    $parts = $line -split "`t", 2
-                    if ($parts.Count -lt 2) { continue }
-                    $candidateName = $parts[0]
-                    $candidateUrl = $parts[1]
-                    if (-not $candidateUrl.StartsWith($dirPrefix)) { continue }
-                    $m = [regex]::Match($candidateName, '(?i)S(?<season>\d{1,2})E(?<ep>\d{1,3})')
-                    if ($m.Success -and ($m.Groups['season'].Value -eq $epMatch.Groups['season'].Value)) {
-                        $epNum = [int]$m.Groups['ep'].Value
-                        $candidates += [pscustomobject]@{ Url = $candidateUrl; Name = $candidateName; Ep = $epNum }
-                    }
-                }
-
-                if ($candidates.Count -gt 1) {
-                    $sorted = $candidates | Sort-Object Ep
-                    # Build a sorted playlist (ascending episodes)
-                    $playerUrls = $sorted | ForEach-Object { $_.Url }
-                    # For players that support starting at an index (mpv), we'll pass the index.
-                    # For other players, fall back to moving the selected item to the front.
-                }
-            }
-            catch {
-                # If anything fails, fall back to playing the single URL
-                $playerUrls = @($url)
-            }
-        }
+        # Build episode playlist (shared helper)
+        $pl = Get-EpisodePlaylistFromUrl -Url $url -Name $name
+        $playerUrls = $pl.Urls
+        $startIndex = $pl.StartIndex
 
         # If using mpv, pass --playlist-start=<index> so mpv plays the full sorted list and starts at the selected episode
         if ($playerUrls.Count -gt 1 -and ($script:Config.MediaPlayer -match '(?i)mpv')) {
-            $startIndex = [array]::IndexOf($playerUrls, $url)
-            if ($startIndex -lt 0) { $startIndex = 0 }
             $playlistArg = "--playlist-start=$startIndex"
             $playerArgs = @($script:Config.MediaPlayerFlags) + @($playlistArg) + $playerUrls
         }
@@ -538,6 +516,40 @@ function Invoke-SearchInteraction {
         Write-Host "Selected for download: $name" -ForegroundColor Green
         Invoke-Download -Url $url -Name $name
         return
+    }
+}
+
+function Import-MpvEventLog {
+    # Read mpv event log from the temp folder and add entries to watch-history.json
+    try {
+        $tmp = $env:TEMP
+        if (-not $tmp) { return 0 }
+        $log = Join-Path $tmp 'bdix-mpv-events.log'
+        if (-not (Test-Path $log)) { return 0 }
+
+        $lines = Get-Content $log -ErrorAction SilentlyContinue
+        if (-not $lines) { Remove-Item $log -Force -ErrorAction SilentlyContinue; return 0 }
+
+        foreach ($line in $lines) {
+            if (-not $line) { continue }
+            try {
+                $obj = $line | ConvertFrom-Json
+                if ($obj.Url -and $obj.Name) {
+                    # Use existing Add-HistoryEntry to maintain dedup/size rules
+                    Add-HistoryEntry -Name $obj.Name -Url $obj.Url
+                }
+            }
+            catch {
+                # ignore malformed lines
+            }
+        }
+
+        # Remove the processed log
+        Remove-Item $log -Force -ErrorAction SilentlyContinue
+        return 1
+    }
+    catch {
+        return 0
     }
 }
 
@@ -920,13 +932,27 @@ function Remove-LogFiles {
 
 function Invoke-ResumeLastPlayed {
     Show-Header "Resume Stream"
+    # Import pending mpv events before resuming
+    $null = Import-MpvEventLog
     $history = Read-JsonFile -Path $WatchHistoryPath
     if (!$history -or $history.Count -eq 0) { Write-Host "No history." -ForegroundColor Red; Wait-Return "Press Enter to return..."; return }
     $last = $history[0]
     if (!$last) { Write-Host "Nothing to resume." -ForegroundColor Yellow; Wait-Return "Press Enter to return..."; return }
     Write-Host "Resuming: $($last.Name)" -ForegroundColor Green
     Add-HistoryEntry -Name $last.Name -Url $last.Url
-    $playerArgs = @($script:Config.MediaPlayerFlags) + @($last.Url)
+    # Use the same episode playlist helper as search/history
+    $pl = Get-EpisodePlaylistFromUrl -Url $last.Url -Name $last.Name
+    $playerUrls = $pl.Urls
+    $startIndex = $pl.StartIndex
+    if ($playerUrls.Count -gt 1 -and ($script:Config.MediaPlayer -match '(?i)mpv')) {
+        $playlistArg = "--playlist-start=$startIndex"
+        $playerArgs = @($script:Config.MediaPlayerFlags) + @($playlistArg) + $playerUrls
+    }
+    else {
+        $playerUrls = ($playerUrls | Where-Object { $_ -ne $last.Url })
+        $playerUrls = ,$last.Url + $playerUrls
+        $playerArgs = @($script:Config.MediaPlayerFlags) + $playerUrls
+    }
     & $script:Config.MediaPlayer $playerArgs
 }
 

@@ -601,6 +601,57 @@ function Invoke-Fzf {
     return $selected
 }
 
+function Get-EpisodePlaylistFromUrl {
+    param(
+        [Parameter(Mandatory = $true)][string]$Url,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    # Default fallback: single-item playlist
+    $result = [PSCustomObject]@{ Urls = @($Url); StartIndex = 0 }
+
+    try {
+        if (-not $script:jqPath) { return $result }
+        if (-not (Test-Path $CrawlerStatePath)) { return $result }
+
+        $epMatch = [regex]::Match($Name, '(?i)S(?<season>\d{1,2})E(?<ep>\d{1,3})')
+        if (-not $epMatch.Success) { return $result }
+
+        # Directory prefix to limit playlist candidates
+        $dirPrefix = ($Url -replace '/[^/]*$','/')
+
+        $jqQuery = '.files | to_entries | .[] | "\(.value)\t\(.key)"'
+        $allLines = Get-Content $CrawlerStatePath -Raw | & $script:jqPath -r $jqQuery
+
+        $candidates = [System.Collections.ArrayList]::new()
+        foreach ($line in ($allLines -split "`n" | Where-Object { $_ })) {
+            $parts = $line -split "`t", 2
+            if ($parts.Count -lt 2) { continue }
+            $candidateName = $parts[0]
+            $candidateUrl = $parts[1]
+            if (-not $candidateUrl.StartsWith($dirPrefix)) { continue }
+            $m = [regex]::Match($candidateName, '(?i)S(?<season>\d{1,2})E(?<ep>\d{1,3})')
+            if ($m.Success -and ($m.Groups['season'].Value -eq $epMatch.Groups['season'].Value)) {
+                $epNum = [int]$m.Groups['ep'].Value
+                $null = $candidates.Add([pscustomobject]@{ Url = $candidateUrl; Name = $candidateName; Ep = $epNum })
+            }
+        }
+
+        if ($candidates.Count -gt 0) {
+            $sorted = $candidates | Sort-Object Ep
+            $playlist = $sorted | ForEach-Object { $_.Url }
+            $startIndex = [array]::IndexOf($playlist, $Url)
+            if ($startIndex -lt 0) { $startIndex = 0 }
+            $result = [PSCustomObject]@{ Urls = @($playlist); StartIndex = $startIndex }
+        }
+    }
+    catch {
+        return $result
+    }
+
+    return $result
+}
+
 # ===== Index Progress Management =====
 
 function Save-IndexProgress {
