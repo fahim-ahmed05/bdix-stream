@@ -90,7 +90,9 @@ function Get-ParsedRows {
         }
         elseif ($ItemType -eq 'file') {
             if ($href.EndsWith('/')) { return }
-            $ext = [System.IO.Path]::GetExtension($href).ToLower()
+            # Strip query string before getting extension (handles URLs like file.mkv?md5=xxx)
+            $hrefPath = $href -replace '\?.*$', ''
+            $ext = [System.IO.Path]::GetExtension($hrefPath).ToLower()
             if ($videoExtensions -notcontains $ext) { return }
         }
         
