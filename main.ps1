@@ -61,6 +61,10 @@ function Invoke-IndexOperation {
         [string]$Mode
     )
     
+    # Initialize empty directory checking list
+    $script:EmptyDirsToCheck = $null
+    $script:MissingTimestampDirsToCheck = $null
+    
     # Load source URLs only when needed for indexing operations
     Initialize-SourceUrls
     
@@ -259,6 +263,8 @@ function Invoke-IndexOperation {
                 if ($existingMissingFileCount -gt 0) {
                     $reindexMissing = Read-YesNo -Message "Force reindex these directories with missing timestamps? (y/N)" -Default 'N'
                     if ($reindexMissing) {
+                        # Store missing timestamp directories for explicit checking after main crawl
+                        $script:MissingTimestampDirsToCheck = $existingMissingDirs
                         foreach ($item in $existingMissingDirs) { $forceSet[$item.url] = $true }
                     }
                 }
@@ -276,6 +282,8 @@ function Invoke-IndexOperation {
                 Write-Host ""
                 $checkEmpty = Read-YesNo -Message "Check if empty directories now have content? (y/N)" -Default 'N'
                 if ($checkEmpty) {
+                    # Store empty directories for explicit checking after main crawl
+                    $script:EmptyDirsToCheck = $existingEmptyDirs
                     foreach ($item in $existingEmptyDirs) { $forceSet[$item.url] = $true }
                 }
             }
@@ -453,6 +461,159 @@ function Invoke-IndexOperation {
     }
     
     Write-Host ""
+    
+    # Explicitly check empty directories if user requested it
+    if ($script:EmptyDirsToCheck -and $script:EmptyDirsToCheck.Count -gt 0) {
+        Write-Host "Checking previously empty directories for content..." -ForegroundColor Cyan
+        $emptyChecked = 0
+        $emptyStillEmpty = 0
+        $emptyNowHaveContent = 0
+        
+        foreach ($item in $script:EmptyDirsToCheck) {
+            $emptyChecked++
+            $url = $item.url
+            Write-Host "  [$emptyChecked/$($script:EmptyDirsToCheck.Count)] Checking: $url" -ForegroundColor DarkGray
+            
+            # Determine if Apache or h5ai based on URL (match against known sources)
+            $isApache = $true  # Default to Apache
+            $matchedSource = $sourcesToProcess | Where-Object { $url.StartsWith($_['url']) } | Select-Object -First 1
+            if ($matchedSource) {
+                $isApache = ($matchedSource.type -eq 'apache')
+            }
+            
+            # Get cookie data if available
+            $cookieData = if ($matchedSource -and $matchedSource.ContainsKey('cookies')) { $matchedSource['cookies'] } else { "" }
+            
+            # Fetch and parse the directory
+            $timeoutSec = if ($script:Config.RequestTimeoutSec) { $script:Config.RequestTimeoutSec } else { 12 }
+            $response = Invoke-SafeWebRequest -Url $url -TimeoutSec $timeoutSec -CookieData $cookieData
+            
+            if ($response) {
+                $html = $response.Content
+                $videos = Get-Videos -Html $html -BaseUrl $url -IsApache $isApache
+                $dirs = Get-Dirs -Html $html -BaseUrl $url -IsApache $isApache
+                
+                $isEmpty = ($videos.Count -eq 0 -and $dirs.Count -eq 0)
+                
+                if (-not $isEmpty) {
+                    $emptyNowHaveContent++
+                    
+                    # Update directory metadata
+                    $allItems = [System.Collections.ArrayList]::new()
+                    if ($dirs) { foreach ($d in $dirs) { $null = $allItems.Add($d) } }
+                    if ($videos) { foreach ($v in $videos) { $null = $allItems.Add($v) } }
+                    $effectiveDirMod = Get-EffectiveTimestamp -Items $allItems
+                    
+                    $normUrl = Add-TrailingSlash $url
+                    if ($effectiveDirMod) {
+                        $CrawlMeta.dirs[$normUrl] = @{ last_modified = $effectiveDirMod }
+                    } else {
+                        $CrawlMeta.dirs[$normUrl] = @{}
+                    }
+                    
+                    # Add video files
+                    foreach ($v in $videos) {
+                        if (-not $CrawlMeta.files.ContainsKey($v.Url)) {
+                            $CrawlMeta.files[$v.Url] = $v.Name
+                            $script:NewFiles++
+                        }
+                    }
+                    
+                    Write-Host "    → Found $($videos.Count) video(s)!" -ForegroundColor Green
+                } else {
+                    $emptyStillEmpty++
+                }
+            } else {
+                $emptyStillEmpty++
+            }
+        }
+        
+        Write-Host ""
+        Write-Host "Empty directory check complete:" -ForegroundColor Cyan
+        Write-Host "  Checked: $emptyChecked" -ForegroundColor Cyan
+        Write-Host "  Now have content: $emptyNowHaveContent" -ForegroundColor Green
+        Write-Host "  Still empty: $emptyStillEmpty" -ForegroundColor Yellow
+        Write-Host ""
+    }
+    
+    # Explicitly reindex directories with missing timestamps if user requested it
+    if ($script:MissingTimestampDirsToCheck -and $script:MissingTimestampDirsToCheck.Count -gt 0) {
+        Write-Host "Reindexing directories with missing timestamps..." -ForegroundColor Cyan
+        $missingChecked = 0
+        $missingUpdated = 0
+        $missingFailed = 0
+        
+        foreach ($item in $script:MissingTimestampDirsToCheck) {
+            $missingChecked++
+            $url = $item.url
+            Write-Host "  [$missingChecked/$($script:MissingTimestampDirsToCheck.Count)] Reindexing: $url" -ForegroundColor DarkGray
+            
+            # Determine if Apache or h5ai based on URL (match against known sources)
+            $isApache = $true  # Default to Apache
+            $matchedSource = $sourcesToProcess | Where-Object { $url.StartsWith($_['url']) } | Select-Object -First 1
+            if ($matchedSource) {
+                $isApache = ($matchedSource.type -eq 'apache')
+            }
+            
+            # Get cookie data if available
+            $cookieData = if ($matchedSource -and $matchedSource.ContainsKey('cookies')) { $matchedSource['cookies'] } else { "" }
+            
+            # Fetch and parse the directory
+            $timeoutSec = if ($script:Config.RequestTimeoutSec) { $script:Config.RequestTimeoutSec } else { 12 }
+            $response = Invoke-SafeWebRequest -Url $url -TimeoutSec $timeoutSec -CookieData $cookieData
+            
+            if ($response) {
+                $html = $response.Content
+                $videos = Get-Videos -Html $html -BaseUrl $url -IsApache $isApache
+                $dirs = Get-Dirs -Html $html -BaseUrl $url -IsApache $isApache
+                
+                # Update directory metadata
+                $allItems = [System.Collections.ArrayList]::new()
+                if ($dirs) { foreach ($d in $dirs) { $null = $allItems.Add($d) } }
+                if ($videos) { foreach ($v in $videos) { $null = $allItems.Add($v) } }
+                $effectiveDirMod = Get-EffectiveTimestamp -Items $allItems
+                
+                $normUrl = Add-TrailingSlash $url
+                $isEmpty = ($videos.Count -eq 0 -and $dirs.Count -eq 0)
+                
+                if ($effectiveDirMod) {
+                    $CrawlMeta.dirs[$normUrl] = @{ last_modified = $effectiveDirMod }
+                } else {
+                    $CrawlMeta.dirs[$normUrl] = @{}
+                }
+                
+                # Add empty flag if directory is empty
+                if ($isEmpty) {
+                    $CrawlMeta.dirs[$normUrl]['empty'] = $true
+                }
+                
+                # Update video files
+                $filesAdded = 0
+                foreach ($v in $videos) {
+                    if (-not $CrawlMeta.files.ContainsKey($v.Url)) {
+                        $CrawlMeta.files[$v.Url] = $v.Name
+                        $script:NewFiles++
+                        $filesAdded++
+                    }
+                }
+                
+                $missingUpdated++
+                if ($filesAdded -gt 0) {
+                    Write-Host "    → Updated with $filesAdded file(s)" -ForegroundColor Green
+                }
+            } else {
+                $missingFailed++
+            }
+        }
+        
+        Write-Host ""
+        Write-Host "Missing timestamp reindex complete:" -ForegroundColor Cyan
+        Write-Host "  Checked: $missingChecked" -ForegroundColor Cyan
+        Write-Host "  Updated: $missingUpdated" -ForegroundColor Green
+        Write-Host "  Failed: $missingFailed" -ForegroundColor Yellow
+        Write-Host ""
+    }
+    
     Write-Host "Finalizing..." -ForegroundColor Cyan
     
     # Only do detailed logging if something changed

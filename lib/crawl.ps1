@@ -40,7 +40,12 @@ function Invoke-IndexCrawl {
     if ($ForceReindexSet.ContainsKey($normUrl)) { $shouldCrawlDir = $true }
     elseif ($CrawlMetaRef.dirs.ContainsKey($normUrl)) {
         $oldMeta = $CrawlMetaRef.dirs[$normUrl]
-        if ($effectiveDirMod -and $oldMeta.ContainsKey('last_modified') -and $oldMeta['last_modified'] -ne $effectiveDirMod) { $shouldCrawlDir = $true }
+        
+        # Always re-check directories marked as empty (they may have been misindexed)
+        if ($oldMeta.ContainsKey('empty') -and $oldMeta['empty']) {
+            $shouldCrawlDir = $true
+        }
+        elseif ($effectiveDirMod -and $oldMeta.ContainsKey('last_modified') -and $oldMeta['last_modified'] -ne $effectiveDirMod) { $shouldCrawlDir = $true }
         elseif (-not $effectiveDirMod -and -not $oldMeta.ContainsKey('last_modified')) { $shouldCrawlDir = $false }
         elseif (-not $effectiveDirMod -or -not $oldMeta.ContainsKey('last_modified')) { $shouldCrawlDir = $true }
         else { $shouldCrawlDir = $false }

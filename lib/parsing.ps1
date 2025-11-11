@@ -66,6 +66,12 @@ function Get-ParsedRows {
     $results = [System.Collections.ArrayList]::new()
     $videoExtensions = $script:Config.VideoExtensions
     
+    # Fallback if VideoExtensions is not set (should never happen but be defensive)
+    if (-not $videoExtensions -or $videoExtensions.Count -eq 0) {
+        $videoExtensions = @('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.ogv', '.ts', '.vob')
+        Write-Host "WARNING: VideoExtensions not set in config, using fallback list" -ForegroundColor Yellow
+    }
+    
     $script:RegexTableRow.Matches($Html) | ForEach-Object {
         $row = $_.Value
         if ($row -match '<th>' -or $row -like '*Parent Directory*') { return }
