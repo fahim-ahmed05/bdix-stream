@@ -557,6 +557,70 @@ function New-SelectiveIndex {
     Invoke-IndexOperation -Mode 'selective'
 }
 
+function Invoke-AddFilesIndex {
+    Show-Header "Add Files (temporary)"
+
+    # Ask for URL to index (not persisted to source-urls.json)
+    $url = Read-Host "Enter the directory URL to index (example: http://example.com/path/)"
+    if (-not $url) { Write-Host "No URL provided. Aborting." -ForegroundColor Yellow; return }
+    $url = Add-TrailingSlash $url
+
+    $isIncremental = Read-YesNo -Message "Build incremental index (only changed content)? (Y/n)" -Default 'Y'
+
+    # Optionally accept cookie string or cookie-file path
+    $cookieData = Read-Host "Cookies (leave empty or enter inline cookies or cookie file path)"
+
+    # Ask user to specify server type (same UI as Add-Source)
+    $type = Read-Host "Type? (1) h5ai / (2) Apache [default: h5ai]"
+    $isApache = $false
+    if ($type -match '^(?i)(2|a|apache)$') { $isApache = $true }
+
+    # Prepare state
+    Reset-CrawlStats
+    $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+
+    # Load existing crawler state (we preserve other sources)
+    $CrawlMeta = Get-CrawlMeta
+
+    # For full reindex of this single URL, remove existing entries under the source root
+    $localForceSet = @{}
+    if (-not $isIncremental) {
+        $normRoot = Add-TrailingSlash $url
+        $localForceSet[$normRoot] = $true
+
+        $keysToRemove = [System.Collections.ArrayList]::new()
+        foreach ($k in $CrawlMeta.dirs.Keys) {
+            if ($k.StartsWith($normRoot)) { $null = $keysToRemove.Add($k) }
+        }
+        foreach ($k in $keysToRemove) { $CrawlMeta.dirs.Remove($k) }
+
+        $keysToRemove = [System.Collections.ArrayList]::new()
+        foreach ($k in $CrawlMeta.files.Keys) {
+            if ($k.StartsWith($normRoot)) { $null = $keysToRemove.Add($k) }
+        }
+        foreach ($k in $keysToRemove) { $CrawlMeta.files.Remove($k) }
+    }
+    else {
+        $localForceSet = @{}
+    }
+
+    # Crawl the provided URL (single-root) and persist changes
+    $Visited = @{}
+    Invoke-IndexCrawl -Url $url -Depth ($script:Config.MaxCrawlDepth - 1) -IsApache $isApache -Visited $Visited -CrawlMetaRef $CrawlMeta -ForceReindexSet $localForceSet -TrackStats $true -CookieData $cookieData
+
+    # Persist updated crawler state and issue logs
+    Set-CrawlMeta -Meta $CrawlMeta
+    $issueCount = Write-IssueDirs -CrawlMeta $CrawlMeta
+    $missingCount = Write-MissingTimestampLog -CrawlMeta $CrawlMeta -LogPath $MissingTimestampsLogPath
+
+    $elapsed = $Stopwatch.Elapsed.ToString('hh\:mm\:ss')
+    Write-Host "Added/updated: New dirs = $script:NewDirs, New files = $script:NewFiles" -ForegroundColor Green
+    Write-Host "Tracked $issueCount problematic directories. Missing timestamps logged: $missingCount" -ForegroundColor Yellow
+    Write-Host "Elapsed time: $elapsed" -ForegroundColor Green
+
+    Wait-Return "Press Enter to return..."
+}
+
 function Remove-InvalidIndexEntries {
     Show-Header "Prune Index"
     if (!(Test-Path $CrawlerStatePath)) {
@@ -716,6 +780,7 @@ while ($true) {
                 '2' = @{ Label = 'Update Index'; Action = { Update-IncrementalIndex } }
                 '3' = @{ Label = 'Selective Index'; Action = { New-SelectiveIndex } }
                 '4' = @{ Label = 'Prune Index'; Action = { Remove-InvalidIndexEntries } }
+                '5' = @{ Label = 'Add Files'; Action = { Invoke-AddFilesIndex } }
             }
         }
         '5' {
