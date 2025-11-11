@@ -493,6 +493,8 @@ function Invoke-IndexOperation {
                 $videos = Get-Videos -Html $html -BaseUrl $url -IsApache $isApache
                 $dirs = Get-Dirs -Html $html -BaseUrl $url -IsApache $isApache
                 
+                Write-Host "    DEBUG: Found $($videos.Count) video(s), $($dirs.Count) dir(s)" -ForegroundColor Magenta
+                
                 $isEmpty = ($videos.Count -eq 0 -and $dirs.Count -eq 0)
                 
                 if (-not $isEmpty) {
@@ -511,15 +513,24 @@ function Invoke-IndexOperation {
                         $CrawlMeta.dirs[$normUrl] = @{}
                     }
                     
-                    # Add video files
+                    # Add video files and track new vs existing
+                    $newFilesCount = 0
+                    $existingFilesCount = 0
                     foreach ($v in $videos) {
                         if (-not $CrawlMeta.files.ContainsKey($v.Url)) {
                             $CrawlMeta.files[$v.Url] = $v.Name
                             $script:NewFiles++
+                            $newFilesCount++
+                        } else {
+                            $existingFilesCount++
                         }
                     }
                     
-                    Write-Host "    → Found $($videos.Count) video(s)!" -ForegroundColor Green
+                    if ($existingFilesCount -gt 0) {
+                        Write-Host "    → Found $($videos.Count) video(s)! ($newFilesCount new, $existingFilesCount already indexed)" -ForegroundColor Green
+                    } else {
+                        Write-Host "    → Found $($videos.Count) video(s)! (all new)" -ForegroundColor Green
+                    }
                 } else {
                     $emptyStillEmpty++
                 }
@@ -566,6 +577,8 @@ function Invoke-IndexOperation {
                 $html = $response.Content
                 $videos = Get-Videos -Html $html -BaseUrl $url -IsApache $isApache
                 $dirs = Get-Dirs -Html $html -BaseUrl $url -IsApache $isApache
+                
+                Write-Host "    DEBUG: Found $($videos.Count) video(s), $($dirs.Count) dir(s)" -ForegroundColor Magenta
                 
                 # Update directory metadata
                 $allItems = [System.Collections.ArrayList]::new()
@@ -616,13 +629,20 @@ function Invoke-IndexOperation {
     
     Write-Host "Finalizing..." -ForegroundColor Cyan
     
-    # Only do detailed logging if something changed
+    # Check if we need to update issue tracking
     $totalChanges = $script:NewDirs + $script:NewFiles
-    if ($totalChanges -gt 0) {
+    $checkedEmptyOrMissing = ($script:EmptyDirsToCheck -and $script:EmptyDirsToCheck.Count -gt 0) -or ($script:MissingTimestampDirsToCheck -and $script:MissingTimestampDirsToCheck.Count -gt 0)
+    
+    # Always update issue tracking if we checked empty/missing dirs, even if no new files (files may already exist)
+    $shouldUpdateIssues = ($totalChanges -gt 0) -or $checkedEmptyOrMissing
+    
+    if ($shouldUpdateIssues) {
         # Write issue directories file (updated state)
         $issueCount = Write-IssueDirs -CrawlMeta $CrawlMeta
         if ($issueCount -gt 0) {
             Write-Host "Tracked $issueCount problematic directories in: $IssueDirsPath" -ForegroundColor Yellow
+        } else {
+            Write-Host "No problematic directories found!" -ForegroundColor Green
         }
         
         # Log missing timestamps and blocked dirs
