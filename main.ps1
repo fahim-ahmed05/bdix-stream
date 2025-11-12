@@ -9,9 +9,9 @@ $DefaultConfig = @{
     MediaPlayerFlags  = @('--save-position-on-quit', '--watch-later-options=start,volume,mute', "--script=$PSScriptRoot\mpv\bdix-history.lua", "--fullscreen")
     DownloadPath      = "$PSScriptRoot\downloads"
     MaxCrawlDepth     = 9
-    RequestTimeoutSec = 8
+    RequestTimeoutSec = 12
     HistoryMaxSize    = 50
-    VideoExtensions   = @('.mp4', '.mkv', '.avi')
+    VideoExtensions   = @('.mp4', '.mkv', '.avi', '.mov', '.wmv', '.flv', '.webm', '.m4v', '.mpg', '.mpeg', '.3gp', '.ogv', '.ts', '.vob')
     DirBlockList      = @('lost found', 'software', 'games', 'e book', 'ebooks', 'tutorial', 'e-books', 'Subs')
     Tools             = @{
         fzf    = ""
@@ -509,7 +509,8 @@ function Invoke-IndexOperation {
                     $normUrl = Add-TrailingSlash $url
                     if ($effectiveDirMod) {
                         $CrawlMeta.dirs[$normUrl] = @{ last_modified = $effectiveDirMod }
-                    } else {
+                    }
+                    else {
                         $CrawlMeta.dirs[$normUrl] = @{}
                     }
                     
@@ -521,20 +522,24 @@ function Invoke-IndexOperation {
                             $CrawlMeta.files[$v.Url] = $v.Name
                             $script:NewFiles++
                             $newFilesCount++
-                        } else {
+                        }
+                        else {
                             $existingFilesCount++
                         }
                     }
                     
                     if ($existingFilesCount -gt 0) {
                         Write-Host "    → Found $($videos.Count) video(s)! ($newFilesCount new, $existingFilesCount already indexed)" -ForegroundColor Green
-                    } else {
+                    }
+                    else {
                         Write-Host "    → Found $($videos.Count) video(s)! (all new)" -ForegroundColor Green
                     }
-                } else {
+                }
+                else {
                     $emptyStillEmpty++
                 }
-            } else {
+            }
+            else {
                 $emptyStillEmpty++
             }
         }
@@ -591,7 +596,8 @@ function Invoke-IndexOperation {
                 
                 if ($effectiveDirMod) {
                     $CrawlMeta.dirs[$normUrl] = @{ last_modified = $effectiveDirMod }
-                } else {
+                }
+                else {
                     $CrawlMeta.dirs[$normUrl] = @{}
                 }
                 
@@ -614,7 +620,8 @@ function Invoke-IndexOperation {
                 if ($filesAdded -gt 0) {
                     Write-Host "    → Updated with $filesAdded file(s)" -ForegroundColor Green
                 }
-            } else {
+            }
+            else {
                 $missingFailed++
             }
         }
@@ -641,7 +648,8 @@ function Invoke-IndexOperation {
         $issueCount = Write-IssueDirs -CrawlMeta $CrawlMeta
         if ($issueCount -gt 0) {
             Write-Host "Tracked $issueCount problematic directories in: $IssueDirsPath" -ForegroundColor Yellow
-        } else {
+        }
+        else {
             Write-Host "No problematic directories found!" -ForegroundColor Green
         }
         
